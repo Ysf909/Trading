@@ -42,6 +42,8 @@ def make_broker(cfg: AppConfig) -> Broker:
             commission_pct=cfg.costs.commission_pct,
             slippage_pct=cfg.costs.slippage_pct,
             breakeven_at_r=cfg.strategy.breakeven_at_r,
+            tp1_r=cfg.strategy.tp1_r,
+            tp1_pct=cfg.strategy.tp1_pct,
             state_path=cfg.broker.state_path,
         )
     if kind == "ccxt":
@@ -51,7 +53,7 @@ def make_broker(cfg: AppConfig) -> Broker:
     if kind == "mt5":
         from .execution.mt5_broker import MT5Broker
 
-        return MT5Broker(cfg.broker)
+        return MT5Broker(cfg.broker, tp1_r=cfg.strategy.tp1_r, tp1_pct=cfg.strategy.tp1_pct)
     raise ValueError(f"unknown broker {cfg.broker.kind!r}")
 
 
@@ -326,10 +328,12 @@ class TradingAgent:
         self.journal.write("broker_" + kind, **ev)
         if kind == "closed" and m is not None and m.guard is not None and ev.get("r") is not None:
             m.guard.on_trade_closed(float(ev["r"]))
-        if kind in ("filled", "closed", "guard_close", "protected", "cancelled"):
+        if kind in ("filled", "partial", "closed", "guard_close", "protected", "cancelled"):
             text = f"{kind.upper()} {ev.get('symbol')} {ev.get('side', '')}".strip()
             if kind == "closed":
                 text += f" {ev.get('exit_reason', '')} {float(ev.get('r', 0) or 0):+.2f}R pnl {float(ev.get('pnl', 0) or 0):+.2f}"
+            if kind == "partial":
+                text += f" - {float(ev.get('partial', 0) or 0):.0%} closed at {ev.get('partial_price')}, stop moved to entry"
             if ev.get("reason") or (kind == "cancelled" and ev.get("exit_reason")):
                 text += f" - {ev.get('reason') or ev.get('exit_reason')}"
             log.info(text)
@@ -364,6 +368,13 @@ class TradingAgent:
         now = datetime.now(timezone.utc)
         feats = payload.get("features") if isinstance(payload.get("features"), dict) else {}
         score = int(payload.get("score", 0))
+        meta: dict[str, Any] = {"source": "tradingview"}
+        try:
+            tp1 = float(payload["tp1"])
+            if 0 < (tp1 - entry) * d < (tp - entry) * d:
+                meta["tp1"] = tp1
+        except (KeyError, TypeError, ValueError):
+            pass
         sig = Signal(
             id=f"tv|{m.cfg.symbol}|{payload.get('time', int(now.timestamp()))}|{side}",
             symbol=m.cfg.symbol,
@@ -383,7 +394,7 @@ class TradingAgent:
             grade=str(payload.get("grade", "")),
             features={k: float(v) for k, v in feats.items()},
             reasons=[f"TradingView alert: {payload.get('model', 'setup')}"],
-            meta={"source": "tradingview"},
+            meta=meta,
         )
         if sig.features:
             sig.features.setdefault("rr", sig.rr)

@@ -9,10 +9,12 @@ Two tools that share one brain:
    Claude for a senior-trader review, sizes the position and executes: paper by default, live
    through MetaTrader 5 (XAUUSD, forex) or ccxt (crypto). Built with **XAUUSD** in mind.
 2. **A TradingView indicator** (`tradingview/SMC_ICT_Pro.pine`, Pine v6) for manual trading.
-   It shows the same analysis on your chart: structure, order blocks, FVGs, liquidity, sweeps,
-   killzones, premium/discount and HTF bias. It also shows the same BUY/SELL setups with entry,
-   stop, target, grade, a live stats dashboard, alerts, and a webhook that lets the agent execute
-   what the chart sees.
+   It shows the same analysis on your chart: structure, order blocks, FVGs, breakers, inverse
+   FVGs, BPRs, OTE, liquidity, sweeps, Judas swings, SMT divergence, killzones, Silver Bullet,
+   the midnight open and opening gaps, premium/discount and HTF bias. It also shows the same
+   BUY/SELL setups step by step, with a 15-point confirmation checklist, entry, stop, TP1, target
+   and grade. Around that sit a live stats dashboard, phone alerts, and a webhook that lets the
+   agent execute what the chart sees.
 
 ```
                 ┌──────────────── TradingView ────────────────┐
@@ -88,11 +90,28 @@ the guard (12 trades with it: too few to mean anything). None of this data is go
 your own XAUUSD history. Details and caveats: [docs/strategy.md](docs/strategy.md),
 [docs/guard.md](docs/guard.md).
 
+### Win rate vs profit
+
+A 39% or 47% win rate does **not** mean losing money. What matters is win rate × average win vs
+loss rate × average loss. In the guarded sample the average winner was **+2.93R** and the average
+loser **−0.98R**, so 47 wins and 53 losses per 100 trades net about **+85R**. At $50 risk per trade
+that is roughly +$4,266 per 100 trades, before costs.
+
+If losing more often than winning is hard to live with, the agent and the indicator now take a
+**partial profit at TP1**. At +1.5R, 50% of the position closes and the stop of the rest moves to
+the entry. The same trades then show a **67% win rate**, +0.72R per trade, profit factor 3.2 and
+the smallest drawdown (3.1R). This is the default for XAUUSD (`strategy.tp1_r: 1.5`; set it to 0
+for one full target). The table for every exit variant is in
+[docs/strategy.md](docs/strategy.md#trade-management-win-rate-is-not-profit).
+
 ## Quick start: TradingView indicator
 
 Pine Editor → new indicator → paste `tradingview/SMC_ICT_Pro.pine` → Save → Add to chart.
-Hover a **BUY/SELL** label for the full reasoning. See [tradingview/README.md](tradingview/README.md)
-for settings and alerts.
+Every setup is numbered on the chart as it forms: ① liquidity taken, ② market structure shift,
+**BUY / SELL** with the entry, SL, TP1 and TP lines, ④ filled. Hover the label for the 15-point
+ICT/SMC confirmation checklist and for how similar setups did on your chart. One alert
+(*Any alert() function call*) sends each setup to your phone with the entry, SL, TP1 and TP. See
+[tradingview/README.md](tradingview/README.md).
 
 ## Quick start: the agent
 

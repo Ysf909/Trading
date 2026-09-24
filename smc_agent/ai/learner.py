@@ -37,6 +37,7 @@ FEATURES = [
     "displacement",
     "model_reversal",
     "zone_fvg",
+    "ote",
     "rr",
     "risk_atr",
 ]

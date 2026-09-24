@@ -385,7 +385,7 @@ class SMCEngine:
             f"Took {'sell' if d == LONG else 'buy'}-side liquidity ({liq}) at {st.ext:.6g}",
             f"{'Bullish' if d == LONG else 'Bearish'} MSS ({st.mss_kind}) through {st.mss_price:.6g}",
         ]
-        return self._build_signal(d, "reversal", zone, sl, st.major, reasons)
+        return self._build_signal(d, "reversal", zone, sl, st.major, reasons, (st.ext, st.ext_bar))
 
     def _continuation(self, d: int, brk: StructureEvent) -> Signal | None:
         c = self.cfg
@@ -406,7 +406,7 @@ class SMCEngine:
             f"Swing structure {'bullish' if d == LONG else 'bearish'}; internal BOS through {brk.price:.6g}",
             f"Protected {'higher low' if d == LONG else 'lower high'} at {anchor.price:.6g}",
         ]
-        return self._build_signal(d, "continuation", zone, sl, False, reasons)
+        return self._build_signal(d, "continuation", zone, sl, False, reasons, (anchor.price, anchor.bar))
 
     def _target(self, d: int, entry: float, risk: float) -> tuple[float, str]:
         c = self.cfg
@@ -423,8 +423,21 @@ class SMCEngine:
                     return lv.price, lv.kind
         return entry + d * c.rr_target * risk, f"{c.rr_target:g}R"
 
+    def ote_retracement(self, d: int, entry: float, origin: float, origin_bar: int) -> float | None:
+        """How deep ``entry`` sits in the leg from ``origin`` to its extreme (0..1).
+
+        ICT's optimal trade entry is the 62-79% retracement of that leg."""
+        t = self.t
+        lo = max(0, origin_bar)
+        if d == LONG:
+            far = max(self.highs[lo : t + 1])
+            return (far - entry) / (far - origin) if far > origin else None
+        far = min(self.lows[lo : t + 1])
+        return (entry - far) / (origin - far) if origin > far else None
+
     def _build_signal(
-        self, d: int, model: str, zone: Zone, sl: float, major_sweep: bool, reasons: list[str]
+        self, d: int, model: str, zone: Zone, sl: float, major_sweep: bool, reasons: list[str],
+        leg: tuple[float, int] | None = None,
     ) -> Signal | None:
         c, t = self.cfg, self.t
         atr = self.atr or 0.0
@@ -456,6 +469,8 @@ class SMCEngine:
             body = max(abs(self.closes[j] - self.opens[j]) for j in range(zone.bar, t + 1))
             confluence = any(f.direction == d and f.overlaps(zone.top, zone.bottom) for f in self.fvgs)
         displacement = body >= c.displacement_atr * atr
+        retr = self.ote_retracement(d, entry, leg[0], leg[1]) if leg is not None else None
+        ote = retr is not None and 0.62 <= retr <= 0.79
 
         features = {
             "htf_aligned": float(self.htf_trend == d),
@@ -469,6 +484,7 @@ class SMCEngine:
             "model_reversal": float(model == "reversal"),
             "zone_fvg": float(zone.kind == "FVG"),
             "is_long": float(d == LONG),
+            "ote": float(ote),
             "rr": rr,
             "risk_atr": risk_atr,
         }
@@ -510,6 +526,8 @@ class SMCEngine:
             reasons.append("Inside killzone: " + "/".join(k for k in self.killzones_now if k in c.killzones))
         if displacement:
             reasons.append("Displacement candle")
+        if ote:
+            reasons.append(f"Entry in the OTE ({retr:.0%} retracement)")
 
         time = self.times[t]
         return Signal(
@@ -532,7 +550,8 @@ class SMCEngine:
             features=features,
             reasons=reasons,
             zone=zone,
-            meta={"tp_kind": tp_kind},
+            meta={"tp_kind": tp_kind, "retracement": None if retr is None else round(retr, 3),
+                  "tp1": entry + d * c.tp1_r * risk if 0 < c.tp1_r < rr else None},
         )
 
     def _reject(self, why: str) -> None:

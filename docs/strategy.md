@@ -92,6 +92,30 @@ The risk guard (next to these rules, not part of them) cuts the default A-grade 
 [guard.md](guard.md). (The "no guard" numbers are slightly different from the table above because
 previous-week levels were added as liquidity afterwards.)
 
+### Trade management: win rate is not profit
+
+A 47% win rate is profitable when winners are about three times larger than losers. Same 64-trade
+guarded sample, same entries, only the exit changes (R per trade; dollars at $50 risk per trade):
+
+| Exit | Trades | Win rate | Avg win | Avg loss | Avg R | PF | Worst DD | Per 100 trades |
+|---|---|---|---|---|---|---|---|---|
+| Full target at liquidity | 64 | 47% | +2.93R | −0.98R | **+0.85R** | 2.63 | 4.0R | +$4,266 |
+| Stop to entry at +1R | 70 | 27% | +2.93R | −0.78R | +0.51R | 2.84 | 5.2R | +$2,572 |
+| 50% at +1R, rest to target | 70 | 73% | +1.18R | −0.98R | +0.59R | 3.23 | 3.3R | +$2,970 |
+| **50% at +1.5R, rest to target** (default for gold) | 69 | **67%** | +1.57R | −0.98R | +0.72R | 3.20 | **3.1R** | +$3,607 |
+| 70% at +1R, rest to target | 70 | 73% | +1.22R | −0.98R | +0.63R | 3.35 | 3.1R | +$3,130 |
+| Fixed 2R target | 49 | 49% | +2.17R | −0.98R | +0.56R | 2.13 | 3.0R | +$2,815 |
+| Fixed 1.5R target | 28 | 61% | +1.59R | −0.98R | +0.58R | 2.51 | 2.0R | +$2,910 |
+
+Expected R per trade = win rate × average win − loss rate × average loss:
+0.47 × 2.93 − 0.53 × 0.98 ≈ +0.86R. Every row is profitable, and they trade off in different ways.
+The full target makes the most money but has long losing runs. The partial take-profit
+(`strategy.tp1_r: 1.5`, `tp1_pct: 50`) wins two trades out of three, has the smallest drawdown and
+gives up about 15% of the profit. It is the XAUUSD default in `config.example.yaml` and in the
+TradingView indicator. When TP1 is hit, half the position closes and the stop of the rest moves to
+the entry. From then on the trade can only end in profit, apart from a gap through the entry.
+Same caveats as above: in-sample, not gold, costs excluded.
+
 ## 5. The learner
 
 `smc_agent/ai/learner.py` fits `P(target before stop)` from the setup's confluence flags, reward:risk

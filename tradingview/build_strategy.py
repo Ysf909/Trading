@@ -1,8 +1,9 @@
 """Generate SMC_ICT_Pro_Strategy.pine from the indicator.
 
 The strategy is the indicator with TradingView orders wired into the same
-trade tracker (hooks marked ``//@@ARM``, ``//@@CANCEL``, ``//@@BE``) so the
-two can never drift apart. Run after editing the indicator:
+trade tracker (hooks marked ``//@@ARM``, ``//@@CANCEL``, ``//@@BE``, ``//@@TP1``,
+``//@@GUARDCLOSE``) so the two can never drift apart. Run after editing the
+indicator:
 
     python tradingview/build_strategy.py
 """
@@ -33,10 +34,19 @@ HOOKS = {
         'strategy.cancel("SMC")',
         "float qtyUnits = strategy.equity * riskPct / 100 / math.abs(e - sl) * sizeMult",
         'strategy.entry("SMC", pick == 1 ? strategy.long : strategy.short, qty = qtyUnits, limit = e)',
+        "if na(cur.tp1)",
+        '    strategy.cancel("SMC tp1")',
+        "else",
+        '    strategy.exit("SMC tp1", from_entry = "SMC", stop = sl, limit = cur.tp1, qty_percent = tp1Pct)',
         'strategy.exit("SMC exit", from_entry = "SMC", stop = sl, limit = tp)',
     ],
-    "//@@CANCEL": ['strategy.cancel("SMC")'],
-    "//@@BE": ['strategy.exit("SMC exit", from_entry = "SMC", stop = cur.slCur, limit = cur.tp)'],
+    "//@@CANCEL": ['strategy.cancel("SMC")', 'strategy.cancel("SMC tp1")'],
+    "//@@BE": [
+        "if not na(cur.tp1) and not cur.tp1Done",
+        '    strategy.exit("SMC tp1", from_entry = "SMC", stop = cur.slCur, limit = cur.tp1, qty_percent = tp1Pct)',
+        'strategy.exit("SMC exit", from_entry = "SMC", stop = cur.slCur, limit = cur.tp)',
+    ],
+    "//@@TP1": ['strategy.exit("SMC exit", from_entry = "SMC", stop = cur.slCur, limit = cur.tp)'],
     "//@@GUARDCLOSE": ['strategy.close("SMC", comment = gActWhy)'],
 }
 

@@ -9,6 +9,9 @@ Conservative intrabar rules (we never know the path inside a candle):
 * on the fill bar only the stop is checked (a target on the same bar is not
   assumed to have happened after the fill).
 * afterwards the stop is always checked before the target.
+* optional partial take-profit (``tp1_r`` / ``tp1_pct``): when price reaches
+  entry + tp1_r x risk, that share of the position is closed there and the
+  stop of the rest moves to the entry price (from the next candle on).
 """
 
 from __future__ import annotations
@@ -36,6 +39,8 @@ class Trade:
     exit_reason: str = ""
     fees: float = 0.0
     pnl: float = 0.0
+    part_frac: float = 0.0  # share closed at the first target (0 = none)
+    part_price: float = 0.0
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -52,7 +57,11 @@ class Trade:
         if self.status != "closed":
             return 0.0
         s = self.signal
-        return (self.exit_price - self.fill_price) * s.direction / s.risk
+        rest = (self.exit_price - self.fill_price) * s.direction / s.risk
+        if self.part_frac <= 0:
+            return rest
+        part = (self.part_price - self.fill_price) * s.direction / s.risk
+        return self.part_frac * part + (1.0 - self.part_frac) * rest
 
     def to_dict(self) -> dict[str, Any]:
         s = self.signal
@@ -79,6 +88,8 @@ class Trade:
             "qty": self.qty,
             "fees": round(self.fees, 6),
             "pnl": round(self.pnl, 6),
+            "partial": round(self.part_frac, 3),
+            "partial_price": self.part_price or None,
         }
 
 
@@ -90,9 +101,17 @@ def _close(trade: Trade, price: float, t: int, time: datetime, reason: str) -> N
     trade.exit_reason = reason
 
 
-def step(trade: Trade, bar: Bar, t: int, breakeven_at_r: float = 0.0) -> str | None:
+def _partial(trade: Trade, price: float, pct: float) -> None:
+    trade.part_frac = pct / 100.0
+    trade.part_price = price
+    trade.sl = trade.fill_price
+    trade.be_moved = True
+
+
+def step(trade: Trade, bar: Bar, t: int, breakeven_at_r: float = 0.0, tp1_r: float = 0.0,
+         tp1_pct: float = 0.0) -> str | None:
     """Advance ``trade`` by one bar. Returns the event name if one occurred:
-    'filled', 'closed', 'filled+closed', 'cancelled' or None."""
+    'filled', 'closed', 'filled+closed', 'partial', 'cancelled' or None."""
     s = trade.signal
     d = s.direction
     if trade.status == "pending":
@@ -119,14 +138,21 @@ def step(trade: Trade, bar: Bar, t: int, breakeven_at_r: float = 0.0) -> str | N
 
     if trade.status == "open":
         sl, tp = trade.sl, s.tp
+        tp1 = None
+        if tp1_r > 0 and 0 < tp1_pct < 100 and trade.part_frac == 0 and tp1_r < s.rr:
+            tp1 = s.entry + d * tp1_r * s.risk
         if d == LONG:
             if bar.open <= sl:
                 _close(trade, bar.open, t, bar.time, "be" if trade.be_moved else "sl")
             elif bar.low <= sl:
                 _close(trade, sl, t, bar.time, "be" if trade.be_moved else "sl")
             elif bar.open >= tp:
+                if tp1 is not None:
+                    _partial(trade, bar.open, tp1_pct)
                 _close(trade, bar.open, t, bar.time, "tp")
             elif bar.high >= tp:
+                if tp1 is not None:
+                    _partial(trade, max(tp1, bar.open), tp1_pct)
                 _close(trade, tp, t, bar.time, "tp")
         else:
             if bar.open >= sl:
@@ -134,11 +160,21 @@ def step(trade: Trade, bar: Bar, t: int, breakeven_at_r: float = 0.0) -> str | N
             elif bar.high >= sl:
                 _close(trade, sl, t, bar.time, "be" if trade.be_moved else "sl")
             elif bar.open <= tp:
+                if tp1 is not None:
+                    _partial(trade, bar.open, tp1_pct)
                 _close(trade, bar.open, t, bar.time, "tp")
             elif bar.low <= tp:
+                if tp1 is not None:
+                    _partial(trade, min(tp1, bar.open), tp1_pct)
                 _close(trade, tp, t, bar.time, "tp")
         if trade.status == "closed":
             return "closed"
+        if tp1 is not None:
+            gap = bar.open >= tp1 if d == LONG else bar.open <= tp1
+            hit = bar.high >= tp1 if d == LONG else bar.low <= tp1
+            if gap or hit:
+                _partial(trade, bar.open if gap else tp1, tp1_pct)
+                return "partial"
         if breakeven_at_r > 0 and not trade.be_moved:
             trigger = s.entry + d * breakeven_at_r * s.risk
             if (bar.high >= trigger) if d == LONG else (bar.low <= trigger):
@@ -161,6 +197,8 @@ def settle(trade: Trade, commission_pct: float, slippage_pct: float = 0.0) -> No
     exit_px = trade.exit_price
     if trade.exit_reason in ("sl", "be") and slippage_pct:
         exit_px -= d * exit_px * slippage_pct / 100.0
-    notional = (trade.fill_price + exit_px) * trade.qty
+    q_part = trade.qty * trade.part_frac
+    q_rest = trade.qty - q_part
+    notional = trade.fill_price * trade.qty + trade.part_price * q_part + exit_px * q_rest
     trade.fees = notional * commission_pct / 100.0
-    trade.pnl = (exit_px - trade.fill_price) * d * trade.qty - trade.fees
+    trade.pnl = ((trade.part_price - trade.fill_price) * q_part + (exit_px - trade.fill_price) * q_rest) * d - trade.fees

@@ -18,6 +18,8 @@ strategy:
   sl_buffer_atr: 0.2          # gold wicks through obvious levels - keep the stop a little further
   min_rr: 1.5
   tp_mode: liquidity
+  tp1_r: 1.5                  # take 50% profit at +1.5R and move the stop to entry (67% win rate in tests)
+  tp1_pct: 50                 # set tp1_r: 0 for one full target (fewer wins, more R per trade)
   killzones: [london, ny_am]  # gold's best hours; used for the confluence score
   killzone_filter: false      # true = only trade London / NY AM
   min_score: 6                # A-grade setups only

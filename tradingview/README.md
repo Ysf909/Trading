@@ -15,23 +15,78 @@ the BUY/SELL setups on your chart are the setups the agent trades.
 
 ## What you see
 
+**Structure and PD arrays**
+
 | Element | Meaning |
 |---|---|
 | `BOS` / `CHoCH` (solid) | swing break of structure / change of character |
-| `iBOS` / `iCHoCH` (dashed) | internal structure — the *market structure shift* used for entries |
+| `iBOS` / `iCHoCH` (dashed) | internal structure: the *market structure shift* used for entries |
 | `HH HL LH LL` | swing points |
 | blue / orange boxes `OB` | bullish / bearish order blocks (`iOB` = internal, off by default) |
-| green / red boxes `FVG` | bullish / bearish fair value gaps (removed once filled) |
-| purple dashed lines | untaken liquidity: `BSL`/`SSL` swing highs/lows, `EQH`/`EQL`, `PDH`/`PDL`, Asia/London session highs/lows — dotted once swept |
-| purple ✕ | liquidity sweep (hover for details) |
+| green / red boxes `FVG` + dotted line | fair value gaps and their 50% (consequent encroachment); removed once filled |
+| grey dashed `+Breaker` / `-Breaker` | an order block that price closed through, which now acts the other way |
+| purple dashed `+IFVG` / `-IFVG` | inverse FVG: a gap that price closed through |
+| amber dashed `BPR` | balanced price range: a bullish and a bearish FVG overlapping |
+| cyan `OTE 62-79%` | optimal trade entry zone of the leg behind a setup |
 | Premium / Discount boxes + dotted EQ | current swing dealing range |
-| background shading | killzones (London blue, NY AM green, NY PM orange, London close purple, Asia grey) |
-| **BUY A** / **SELL A+** labels | a setup armed and allowed by the risk guard; hover for the full reasoning, entry, stop, (capped) target and score |
-| grey **BUY?** / **SELL?** | a setup the risk guard refused; hover to see every reason (don't take it manually either) |
+| lime / red candles | displacement candles (large body, close near the extreme) |
+
+**Liquidity and time**
+
+| Element | Meaning |
+|---|---|
+| purple dashed lines | untaken liquidity: `BSL`/`SSL` swing highs/lows, `EQH`/`EQL`, `PDH`/`PDL`, `PWH`/`PWL`, Asia/London session highs/lows; dotted once swept |
+| purple ✕ | liquidity sweep (hover: swept and rejected, or taken) |
+| `Judas` | London ran the Asia high/low and rejected it: the false move of the day |
+| blue `SMT` | SMT divergence: gold made a lower low (higher high), silver did not. Set another symbol, or DXY with *inverse* |
+| `PMH` / `PML` | previous month high / low |
+| dotted `Midnight open`, `08:30 open`, dashed `Weekly open` | ICT opening prices (New York time) |
+| cyan `NDOG` / `NWOG` | new day / new week opening gaps |
+| Asia / London / New York boxes | session ranges |
+| background shading | killzones (London blue, NY AM green, NY PM orange, London close purple, Asia grey); yellow = Silver Bullet hour (03-04, 10-11, 14-15 NY) |
+
+**Setups, step by step**
+
+| Element | Meaning |
+|---|---|
+| ① | step 1: major liquidity taken (a reversal may be starting) |
+| ② | step 2: market structure shift after the sweep; waiting for the entry zone |
+| **BUY A 11/15** / **SELL A+ 9/15** | step 3: the setup is armed and allowed by the risk guard. The label shows the grade and how many of the 15 confirmations are present. Hover it for the entry, SL, TP1, TP, the checklist and how similar setups did on this chart |
+| grey **BUY?** / **SELL?** | a setup the risk guard (or your *Min confirmations*) refused; hover for every reason and the checklist. Don't take it manually either |
+| ④ | step 4: the limit order filled |
+| dashed lines + price tags | pending entry (grey), stop (red), **TP1** (amber) and target (green) |
+| `TP1` label | half the position closed, stop moved to entry: the rest runs risk-free |
+| green / red boxes + `+1.7R` | the tracked trade from fill to exit and its result |
 | small grey `x` | a pending order the guard cancelled (news, session, shock, streak) |
-| dashed grey / red / green lines | pending limit entry, stop, target (valid for *Limit order valid* bars) |
-| green / red boxes + `+2.3R` | the tracked trade from fill to exit and its result |
-| dashboard | every higher timeframe (trend + position in its range), structure, premium/discount %, killzone, **guard status**, volatility vs normal and vs ADR, setup state, open trade, live stats, today / week / drawdown in R |
+| dashboard | every higher timeframe (trend and position in its range), structure, premium/discount %, killzone / Silver Bullet, **guard status**, volatility, setup state, open trade with SL / TP1 / TP, live stats (win rate, total R, profit factor, average win vs loss), **win rate by grade on this chart**, last setup |
+
+## The 15 confirmations
+
+Every setup is checked against the ICT / SMC confirmations below. ✅ = present, ⬜ = missing.
+They appear in the label tooltip and in the phone alert. *Min confirmations* (default 0 = off)
+can require a minimum count on top of the score.
+
+1. Liquidity taken + market structure shift (reversal) / break of structure with the swing trend (continuation)
+2. HTF bias in the trade's direction (auto HTF: 15m → 4H, …)
+3. Daily trend in the trade's direction (*Never trade against* timeframe)
+4. H4 structure in the trade's direction, or a pullback into its discount (premium)
+5. Swing structure aligned
+6. Entry in discount (buy) / premium (sell)
+7. Major liquidity swept (swing, equal highs/lows, PDH/PDL, session highs/lows, PWH/PWL)
+8. Displacement candle behind the move
+9. Fair value gap entry
+10. Order block + FVG overlap
+11. Entry inside the OTE (62–79% retracement of the leg)
+12. Inside a killzone
+13. Inside a Silver Bullet hour
+14. SMT divergence with the correlated market
+15. Buy below / sell above the midnight open
+
+"Trained on your chart": the indicator records the result of every tracked setup by model and
+grade and shows it in the tooltip, the alert and the dashboard. An example is "This chart: 23
+closed reversal A setups, 65% won, avg +0.61R". Load as much history as your plan allows (scroll
+back, or use a higher timeframe) before relying on it. The Python agent goes further: `smc-agent
+train` fits a model on your exported history.
 
 ## The entry models
 
@@ -73,10 +128,13 @@ Alerts *Setup blocked by guard* and *Guard acted on trade* tell you when it step
 
 ## Recommended settings for XAUUSD
 
-* Chart: M15 (or M5) on OANDA:XAUUSD / your broker's gold feed.
-* Keep the guard on; enter the week's high-impact USD events every Sunday.
+* Chart: M15 (or M5) on OANDA:XAUUSD / your broker's gold feed. SMT against OANDA:XAGUSD (default).
+* Keep the guard on and enter the week's high-impact USD events every Sunday.
+* *Partial take-profit* on (default): 50% at 1.5R, stop to entry. In tests this gave 67% winners
+  instead of 47%, with a smaller drawdown. Switch it off for one full target: fewer winners, but
+  more R per trade.
 * *Stop buffer* 0.2 ATR (gold sweeps obvious levels). Killzones: London + New York AM score.
-* *Only trade inside scoring killzones* is a good extra filter for gold.
+* *Only trade inside scoring killzones* and *Min confirmations* 9–10 are good extra filters.
 
 ## Recommended settings (other markets)
 
@@ -90,23 +148,61 @@ Lower *Min confluence score* to 4–5 to see more (lower quality) setups; raise 
 the cleanest. The dashboard statistics update instantly, so compare settings on your own market
 before trusting them.
 
-## Alerts
+## Alerts: get every setup on your phone
 
-* **Classic alerts:** *Create alert* → condition *SMC ICT Pro* → pick *Buy setup armed*, *Sell
-  setup armed*, *Long filled*, *Trade closed*, *Swing BOS / CHoCH*, *Major liquidity swept* …
-* **Agent webhook (automatic execution):** set *Webhook passphrase* in the inputs, then
-  *Create alert* → condition *SMC ICT Pro* → **Any alert() function call** → *Once per bar close*,
-  tick *Webhook URL* and enter your server (`https://your-host/`). Each armed setup posts JSON:
+1. Install the TradingView app on your phone and log in. Allow its notifications.
+2. On the chart: **Create alert** (alarm-clock icon) → Condition **SMC ICT Pro** → **Any alert()
+   function call**. Expiration: open-ended. Notifications: tick **Notify on app** (and email /
+   webhook if you like). One alert covers everything below.
+3. Choose what it sends in the indicator inputs (*Alerts / notifications*):
+
+| Input | Message |
+|---|---|
+| *Trade setup* | 🟢 BUY LIMIT / 🔴 SELL LIMIT with the entry, SL, TP1, TP, RR, grade, the 15-point checklist and this chart's history for that setup type |
+| *Setup forming* | ⏳ liquidity taken + market structure shift: get to the chart, the entry zone is coming |
+| *Entry filled, TP1 hit, trade closed* | fill price; TP1 hit with the stop moved to entry; result in R |
+| *Guard actions* | 🛡 pending order cancelled / trade closed or protected before news, the weekend, a volatility shock |
+
+Example:
+
+```
+🟢 BUY LIMIT XAUUSD 15
+Reversal setup, grade A (7/10), 11/15 confirmations
+Entry 2331.45
+SL 2326.80 (risk 4.65)
+TP1 2338.43 (1.5R: close 50%, move SL to entry)
+TP 2345.10 (2.94R)
+Valid for 20 bars
+✅ Liquidity taken + market structure shift
+✅ HTF bias bullish (H4)
+✅ D trend bullish
+...
+This chart: 23 closed reversal A setups, 65% won, avg +0.61R
+```
+
+Classic alerts are also available: *Buy / Sell setup armed*, *Setup forming*, *Long / Short
+filled*, *TP1 hit*, *Trade closed*, *Swing BOS / CHoCH*, *Internal CHoCH*, *Major liquidity
+swept*, *Setup blocked by guard*, *Guard acted on trade*.
+
+### Agent webhook (automatic execution)
+
+Set *alert() message* to **JSON (agent webhook)** (or *Both*) and *Webhook passphrase*. Then
+create the alert as above, tick *Webhook URL* and enter your server (`https://your-host/`). Each
+tracked setup posts:
 
 ```json
-{"passphrase":"...","event":"setup","ticker":"BTCUSDT","exchange":"BINANCE","tf":"15",
- "side":"long","model":"reversal","entry":64150.5,"sl":63820.1,"tp":65010,"rr":2.6,
- "score":7,"grade":"A","expiry_bars":20,"features":{"htf_aligned":1,"pd_ok":1,...},"time":1727000000000}
+{"passphrase":"...","event":"setup","ticker":"XAUUSD","exchange":"OANDA","tf":"15",
+ "side":"long","model":"reversal","entry":2331.45,"sl":2326.8,"tp":2345.1,"tp1":2338.425,
+ "confirmations":11,"rr":2.935,"score":7,"grade":"A","expiry_bars":20,
+ "features":{"htf_aligned":1,"pd_ok":1,"ote":1,...},"time":1727000000000}
 ```
 
 Run `smc-agent webhook -c config.yaml` to receive it; the agent applies its own risk manager
-(and optionally the learned edge filter and the Claude review) before placing the order. See the
-main README.
+(and optionally the learned edge filter and the Claude review) before placing the order, with its
+own TP1 settings (`strategy.tp1_r`). An alert sends every message to all of its channels, so
+with *Both* your phone also receives the JSON and the webhook the text (the agent ignores text).
+To keep them apart, add the indicator to the chart twice: one copy on *Readable* with the phone
+alert, one on *JSON* with the webhook alert.
 
 ## Notes
 
@@ -114,6 +210,9 @@ main README.
 * Previous-day levels follow the symbol's exchange session (the Python agent uses UTC by default;
   set `strategy.day_tz` to match e.g. `America/New_York` for forex).
 * The dashboard stats use conservative fills (stop checked before target; no target on the fill
-  bar). The Strategy Tester uses TradingView's broker emulator, so numbers can differ slightly.
+  bar; after TP1 the stop is at entry from the next candle). The Strategy Tester uses
+  TradingView's broker emulator (TP1 as a `qty_percent` exit), so numbers can differ slightly.
+* SMT divergence and the chart history are TradingView-only confirmations; the Python agent
+  scores setups with the same rules otherwise.
 * If TradingView reports a compile error after a platform update, open an issue with the line
   number — the script is plain Pine v6 with no external libraries.

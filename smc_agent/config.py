@@ -63,6 +63,8 @@ class StrategyConfig:
     min_rr: float = 1.5
     max_rr: float = 6.0
     breakeven_at_r: float = 0.0  # move SL to entry after +xR (0 = off)
+    tp1_r: float = 0.0  # partial take-profit at +xR (0 = off); the rest runs with the stop at entry
+    tp1_pct: float = 50.0  # % of the position closed at tp1
 
     # --- filters / confluence -----------------------------------------------
     htf_minutes: int = 0  # bias timeframe in minutes; 0 = auto from chart timeframe

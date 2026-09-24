@@ -75,12 +75,16 @@ class PaperBroker(Broker):
         commission_pct: float = 0.02,
         slippage_pct: float = 0.0,
         breakeven_at_r: float = 0.0,
+        tp1_r: float = 0.0,
+        tp1_pct: float = 50.0,
         state_path: str | Path | None = None,
     ) -> None:
         self.cash = starting_equity
         self.commission_pct = commission_pct
         self.slippage_pct = slippage_pct
         self.breakeven_at_r = breakeven_at_r
+        self.tp1_r = tp1_r
+        self.tp1_pct = tp1_pct
         self.state_path = Path(state_path) if state_path else None
         self.active: dict[str, Trade] = {}
         self.closed: list[dict[str, Any]] = []
@@ -158,10 +162,12 @@ class PaperBroker(Broker):
         tr = self.active.get(symbol)
         if tr is None:
             return []
-        ev = step(tr, bar, t, self.breakeven_at_r)
+        ev = step(tr, bar, t, self.breakeven_at_r, self.tp1_r, self.tp1_pct)
         events: list[dict[str, Any]] = []
         if ev in ("filled", "filled+closed"):
             events.append({"event": "filled", **tr.to_dict()})
+        if ev == "partial":
+            events.append({"event": "partial", **tr.to_dict()})
         if tr.status == "closed":
             settle(tr, self.commission_pct, self.slippage_pct)
             self.cash += tr.pnl
@@ -186,6 +192,7 @@ class PaperBroker(Broker):
             "closed": self.closed[-500:],
             "open": [
                 {"signal": tr.signal.to_dict(), "qty": tr.qty, "sl": tr.sl, "be_moved": tr.be_moved,
+                 "part_frac": tr.part_frac, "part_price": tr.part_price,
                  "fill_price": tr.fill_price, "fill_time": tr.fill_time.isoformat() if tr.fill_time else None}
                 for tr in self.active.values() if tr.status == "open"
             ],
@@ -206,6 +213,8 @@ class PaperBroker(Broker):
             sig = signal_from_dict(rec["signal"])
             tr = Trade(sig, qty=rec["qty"], status="open", sl=rec["sl"], be_moved=rec.get("be_moved", False))
             tr.fill_price = rec["fill_price"]
+            tr.part_frac = float(rec.get("part_frac", 0.0))
+            tr.part_price = float(rec.get("part_price", 0.0))
             tr.fill_time = datetime.fromisoformat(rec["fill_time"]) if rec.get("fill_time") else None
             self.active[sig.symbol] = tr
         # pending orders are not restored: their bar clock restarts with the engine

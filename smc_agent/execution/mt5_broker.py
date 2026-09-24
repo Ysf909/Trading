@@ -27,22 +27,30 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class _Tracked:
-    ticket: int  # order ticket == position identifier once filled
+    tickets: list[int]  # order tickets == position identifiers once filled; [tp1 leg, runner] when split
     signal: Signal
     risk_money: float
     status: str = "pending"  # pending | open
+    split: bool = False
+    tp1_done: bool = False
+
+    @property
+    def ticket(self) -> int:
+        return self.tickets[-1]
 
 
 class MT5Broker(Broker):
     name = "mt5"
 
-    def __init__(self, cfg: BrokerConfig) -> None:
+    def __init__(self, cfg: BrokerConfig, tp1_r: float = 0.0, tp1_pct: float = 50.0) -> None:
         import MetaTrader5 as mt5  # optional dependency
 
         if not mt5.initialize():
             raise RuntimeError(f"MT5 initialize() failed: {mt5.last_error()}")
         self.mt5 = mt5
         self.cfg = cfg
+        self.tp1_r = tp1_r
+        self.tp1_pct = tp1_pct
         self.tracked: dict[str, _Tracked] = {}
 
     # ------------------------------------------------------------ account
@@ -105,32 +113,55 @@ class MT5Broker(Broker):
         market_now = (tick.ask <= sig.entry) if long else (tick.bid >= sig.entry)
         tf_min = timeframe_minutes(sig.timeframe) if sig.timeframe else 15
         expires = datetime.now(timezone.utc) + timedelta(minutes=tf_min * sig.expiry_bars)
-        req: dict[str, Any] = {
-            "symbol": sig.symbol,
-            "volume": float(qty),
-            "sl": float(sig.sl),
-            "tp": float(sig.tp),
-            "deviation": self.cfg.mt5_deviation,
-            "magic": self.cfg.mt5_magic,
-            "comment": f"smc {sig.model[:4]} {sig.grade}",
-        }
-        if market_now:  # price already at/through the entry: take it at market
-            req.update(action=mt5.TRADE_ACTION_DEAL, type=mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL,
-                       price=tick.ask if long else tick.bid, type_filling=mt5.ORDER_FILLING_IOC)
-        else:
-            req.update(action=mt5.TRADE_ACTION_PENDING,
-                       type=mt5.ORDER_TYPE_BUY_LIMIT if long else mt5.ORDER_TYPE_SELL_LIMIT,
-                       price=float(sig.entry), type_time=mt5.ORDER_TIME_SPECIFIED,
-                       expiration=int(expires.timestamp()), type_filling=mt5.ORDER_FILLING_RETURN)
-        res = mt5.order_send(req)
-        if res is None or res.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
-            raise RuntimeError(f"MT5 order_send failed: {getattr(res, 'retcode', None)} {getattr(res, 'comment', '')}")
         info = mt5.symbol_info(sig.symbol)
+        legs: list[tuple[float, float]] = [(float(qty), float(sig.tp))]
+        acct = mt5.account_info()
+        hedging = acct is not None and acct.margin_mode == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
+        if self.tp1_r > 0 and not hedging:
+            log.warning("mt5: netting account - partial take-profit needs a hedging account; single target")
+        if self.tp1_r > 0 and hedging and 0 < self.tp1_pct < 100 and self.tp1_r < sig.rr and info is not None:
+            step = info.volume_step
+            v1 = math.floor(qty * self.tp1_pct / 100.0 / step) * step
+            v2 = round(qty - v1, 8)
+            if v1 >= info.volume_min and v2 >= info.volume_min:
+                tp1 = sig.entry + sig.direction * self.tp1_r * sig.risk
+                legs = [(round(v1, 8), float(tp1)), (v2, float(sig.tp))]
+            else:
+                log.warning("mt5: %.2f lots cannot be split for a partial take-profit; single target", qty)
+        tickets: list[int] = []
+        for volume, target in legs:
+            req: dict[str, Any] = {
+                "symbol": sig.symbol,
+                "volume": volume,
+                "sl": float(sig.sl),
+                "tp": target,
+                "deviation": self.cfg.mt5_deviation,
+                "magic": self.cfg.mt5_magic,
+                "comment": f"smc {sig.model[:4]} {sig.grade}" + (" tp1" if len(legs) == 2 and not tickets else ""),
+            }
+            if market_now:  # price already at/through the entry: take it at market
+                req.update(action=mt5.TRADE_ACTION_DEAL, type=mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL,
+                           price=tick.ask if long else tick.bid, type_filling=mt5.ORDER_FILLING_IOC)
+            else:
+                req.update(action=mt5.TRADE_ACTION_PENDING,
+                           type=mt5.ORDER_TYPE_BUY_LIMIT if long else mt5.ORDER_TYPE_SELL_LIMIT,
+                           price=float(sig.entry), type_time=mt5.ORDER_TIME_SPECIFIED,
+                           expiration=int(expires.timestamp()), type_filling=mt5.ORDER_FILLING_RETURN)
+            res = mt5.order_send(req)
+            if res is None or res.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
+                for tk in tickets:  # never leave half a trade behind
+                    if market_now:
+                        self._close_ticket(sig.symbol, tk, "second leg rejected")
+                    else:
+                        self._send({"action": mt5.TRADE_ACTION_REMOVE, "order": tk}, f"cancel {tk}")
+                raise RuntimeError(f"MT5 order_send failed: {getattr(res, 'retcode', None)} {getattr(res, 'comment', '')}")
+            tickets.append(res.order)
+            log.info("mt5: %s %s %.2f lots @ %s sl %s tp %s ticket %s", "BUY" if long else "SELL",
+                     sig.symbol, volume, req["price"], sig.sl, target, res.order)
         risk_money = qty * sig.risk / info.trade_tick_size * info.trade_tick_value if info else 0.0
-        self.tracked[sig.symbol] = _Tracked(res.order, sig, risk_money, "open" if market_now else "pending")
-        log.info("mt5: %s %s %.2f lots @ %s sl %s tp %s ticket %s", "BUY" if long else "SELL",
-                 sig.symbol, qty, req["price"], sig.sl, sig.tp, res.order)
-        return str(res.order)
+        self.tracked[sig.symbol] = _Tracked(tickets, sig, risk_money, "open" if market_now else "pending",
+                                            split=len(tickets) == 2)
+        return ",".join(str(t) for t in tickets)
 
     def _send(self, req: dict[str, Any], what: str) -> bool:
         res = self.mt5.order_send(req)
@@ -149,19 +180,25 @@ class MT5Broker(Broker):
             del self.tracked[symbol]
         return events
 
-    def close_position(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+    def _close_ticket(self, symbol: str, ticket: int, reason: str) -> bool:
         mt5 = self.mt5
-        events = []
-        for p in self._positions(symbol):
+        for p in mt5.positions_get(ticket=ticket) or []:
             tick = mt5.symbol_info_tick(symbol)
             buy = p.type == mt5.POSITION_TYPE_BUY
             req = {
                 "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": p.volume, "position": p.ticket,
                 "type": mt5.ORDER_TYPE_SELL if buy else mt5.ORDER_TYPE_BUY,
                 "price": tick.bid if buy else tick.ask, "deviation": self.cfg.mt5_deviation,
-                "magic": self.cfg.mt5_magic, "comment": "smc guard exit", "type_filling": mt5.ORDER_FILLING_IOC,
+                "magic": self.cfg.mt5_magic, "comment": f"smc exit: {reason}"[:31],
+                "type_filling": mt5.ORDER_FILLING_IOC,
             }
-            if self._send(req, f"close {p.ticket}"):
+            return self._send(req, f"close {p.ticket}")
+        return False
+
+    def close_position(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        events = []
+        for p in self._positions(symbol):
+            if self._close_ticket(symbol, p.ticket, reason):
                 events.append({"event": "guard_close", "symbol": symbol, "ticket": p.ticket, "reason": reason})
         return events
 
@@ -178,6 +215,18 @@ class MT5Broker(Broker):
                                "reason": reason})
         return events
 
+    def _runner_to_entry(self, symbol: str) -> list[dict[str, Any]]:
+        """After TP1: stop of the runner to its entry. If price is already back
+        beyond the entry the broker would reject that stop, so the runner is
+        closed at market instead (the simulator exits at the next open)."""
+        mt5 = self.mt5
+        tick = mt5.symbol_info_tick(symbol)
+        for p in self._positions(symbol):
+            buy = p.type == mt5.POSITION_TYPE_BUY
+            if tick is not None and (tick.bid <= p.price_open if buy else tick.ask >= p.price_open):
+                return self.close_position(symbol, "first target hit, price back at the entry")
+        return self.protect(symbol, "first target hit")
+
     def position_info(self, symbol: str) -> dict[str, Any] | None:
         pos = self._positions(symbol)
         if pos:
@@ -192,7 +241,7 @@ class MT5Broker(Broker):
         return None
 
     def _closed_result(self, tr: _Tracked) -> dict[str, Any]:
-        deals = self.mt5.history_deals_get(position=tr.ticket) or []
+        deals = [d for tk in tr.tickets for d in (self.mt5.history_deals_get(position=tk) or [])]
         pnl = float(sum(d.profit + d.commission + d.swap for d in deals))
         r = pnl / tr.risk_money if tr.risk_money > 0 else 0.0
         return {"event": "closed", "symbol": tr.signal.symbol, "ticket": tr.ticket, "pnl": pnl, "r": r,
@@ -204,27 +253,34 @@ class MT5Broker(Broker):
             return []
         mt5 = self.mt5
         events: list[dict[str, Any]] = []
+        live = [tk for tk in tr.tickets if mt5.positions_get(ticket=tk)]
+        waiting = [tk for tk in tr.tickets if mt5.orders_get(ticket=tk)]
         if tr.status == "pending":
-            if mt5.orders_get(ticket=tr.ticket):
+            if waiting and not live:
                 sig = tr.signal
                 reached_tp = bar.high >= sig.tp if sig.direction == LONG else bar.low <= sig.tp
                 if reached_tp:
                     return self.cancel_pending(symbol, "missed: target traded before the fill")
                 return []
-            if mt5.positions_get(ticket=tr.ticket):
+            if live:
                 tr.status = "open"
-                events.append({"event": "filled", "symbol": symbol, "ticket": tr.ticket, "side": tr.signal.side})
+                events.append({"event": "filled", "symbol": symbol, "tickets": tr.tickets, "side": tr.signal.side})
             else:  # expired / removed without a fill, or filled and already closed
-                deals = mt5.history_deals_get(position=tr.ticket) or []
-                if deals:
-                    events.append(self._closed_result(tr))
-                else:
-                    events.append({"event": "cancelled", "symbol": symbol, "ticket": tr.ticket, "reason": "expired"})
+                deals = [d for tk in tr.tickets for d in (mt5.history_deals_get(position=tk) or [])]
+                events.append(self._closed_result(tr) if deals else
+                              {"event": "cancelled", "symbol": symbol, "tickets": tr.tickets, "reason": "expired"})
                 del self.tracked[symbol]
                 return events
-        if tr.status == "open" and not mt5.positions_get(ticket=tr.ticket):
-            events.append(self._closed_result(tr))
-            del self.tracked[symbol]
+        if tr.status == "open":
+            if tr.split and not tr.tp1_done and tr.tickets[0] not in live and tr.tickets[1] in live:
+                tr.tp1_done = True  # first leg took profit: the runner becomes risk-free
+                events.append({"event": "partial", "symbol": symbol, "partial": self.tp1_pct / 100.0,
+                               "side": tr.signal.side, "ticket": tr.tickets[0]})
+                events += self._runner_to_entry(symbol)
+                live = [tk for tk in tr.tickets if mt5.positions_get(ticket=tk)]
+            if not live and not waiting:
+                events.append(self._closed_result(tr))
+                del self.tracked[symbol]
         return events
 
     def close(self) -> None:

@@ -87,7 +87,7 @@ def run_backtest(
         if grd is not None:
             grd.begin_bar(bar)
         if active is not None:
-            ev = step(active, bar, t, strategy.breakeven_at_r)
+            ev = step(active, bar, t, strategy.breakeven_at_r, strategy.tp1_r, strategy.tp1_pct)
             if active.status == "closed":
                 close_out(active)
                 active = None
@@ -164,7 +164,7 @@ def collect_outcomes(df: pd.DataFrame, strategy: StrategyConfig, symbol: str = "
             grd.begin_bar(bar)
         still: list[Trade] = []
         for tr in live:
-            step(tr, bar, t, strategy.breakeven_at_r)
+            step(tr, bar, t, strategy.breakeven_at_r, strategy.tp1_r, strategy.tp1_pct)
             (done if tr.status in ("closed", "cancelled") else still).append(tr)
         live = still
         signals = engine.update(bar)
