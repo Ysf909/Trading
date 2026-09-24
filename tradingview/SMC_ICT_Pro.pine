@@ -365,6 +365,46 @@ f_rangePos(TFS tf, float price) =>
         pos := (price - tf.bot) / (tf.top - tf.bot)
     pos
 
+f_inSess(string sess) =>
+    not na(time(timeframe.period, sess + ":1234567", "America/New_York"))
+
+// pivot high at bar n bars ago: higher than the n bars before it, >= the n bars after it
+f_pivots(int n) =>
+    float leftHi  = ta.highest(high, n)[n + 1]
+    float rightHi = ta.highest(high, n)
+    float leftLo  = ta.lowest(low, n)[n + 1]
+    float rightLo = ta.lowest(low, n)
+    float ph = na
+    float pl = na
+    if bar_index >= 2 * n
+        if high[n] > leftHi and high[n] >= rightHi
+            ph := high[n]
+        if low[n] < leftLo and low[n] <= rightLo
+            pl := low[n]
+    [ph, pl]
+
+// trend of a pivot structure (used inside request.security for the HTF bias)
+f_htfTrend(int n) =>
+    var int   trend = 0
+    var float hiP   = na
+    var bool  hiX   = true
+    var float loP   = na
+    var bool  loX   = true
+    [ph, pl] = f_pivots(n)
+    if not na(ph)
+        hiP := ph
+        hiX := false
+    if not na(pl)
+        loP := pl
+        loX := false
+    if not hiX and close > hiP
+        hiX   := true
+        trend := 1
+    if not loX and close < loP
+        loX   := true
+        trend := -1
+    trend
+
 // state of one higher timeframe from its *completed* candles (all values [1]):
 // trend, trailing range, unbroken swing high/low, latest unfilled bull/bear FVG, previous candle H/L
 f_mtf(int n) =>
@@ -414,46 +454,6 @@ f_mtf(int n) =>
     float swH = hiX ? na : hiP
     float swL = loX ? na : loP
     [trend[1], tTop[1], tBot[1], swH[1], swL[1], bT[1], bB[1], sT[1], sB[1], high[1], low[1]]
-
-f_inSess(string sess) =>
-    not na(time(timeframe.period, sess + ":1234567", "America/New_York"))
-
-// pivot high at bar n bars ago: higher than the n bars before it, >= the n bars after it
-f_pivots(int n) =>
-    float leftHi  = ta.highest(high, n)[n + 1]
-    float rightHi = ta.highest(high, n)
-    float leftLo  = ta.lowest(low, n)[n + 1]
-    float rightLo = ta.lowest(low, n)
-    float ph = na
-    float pl = na
-    if bar_index >= 2 * n
-        if high[n] > leftHi and high[n] >= rightHi
-            ph := high[n]
-        if low[n] < leftLo and low[n] <= rightLo
-            pl := low[n]
-    [ph, pl]
-
-// trend of a pivot structure (used inside request.security for the HTF bias)
-f_htfTrend(int n) =>
-    var int   trend = 0
-    var float hiP   = na
-    var bool  hiX   = true
-    var float loP   = na
-    var bool  loX   = true
-    [ph, pl] = f_pivots(n)
-    if not na(ph)
-        hiP := ph
-        hiX := false
-    if not na(pl)
-        loP := pl
-        loX := false
-    if not hiX and close > hiP
-        hiX   := true
-        trend := 1
-    if not loX and close < loP
-        loX   := true
-        trend := -1
-    trend
 
 method advance(Structure s, float ph, float pl, int n) =>
     if not na(ph)

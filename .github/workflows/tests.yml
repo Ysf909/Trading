@@ -17,6 +17,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      - name: Pine static checks (declaration order, scopes, typos)
+        run: python tradingview/check_pine.py
       - name: strategy file is up to date
         run: |
           python tradingview/build_strategy.py

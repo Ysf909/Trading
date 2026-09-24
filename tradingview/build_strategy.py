@@ -21,7 +21,7 @@ DECL = (
     'strategy("SMC ICT Pro - Strategy", shorttitle = "SMC ICT Pro S", overlay = true, '
     "max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_bars_back = 1000, "
     "initial_capital = 10000, commission_type = strategy.commission.percent, commission_value = 0.02, "
-    "slippage = 0, pyramiding = 0, process_orders_on_close = false)"
+    "slippage = 0, pyramiding = 0, process_orders_on_close = false, margin_long = 5, margin_short = 5)"
 )
 
 RISK_INPUT = (
