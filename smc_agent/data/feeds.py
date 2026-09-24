@@ -5,6 +5,7 @@ containing *closed* candles only."""
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,8 +13,10 @@ from typing import Protocol
 
 import pandas as pd
 
-from ..config import MarketConfig
+from ..config import BrokerConfig, MarketConfig
 from ..core.timeframes import timeframe_minutes
+
+log = logging.getLogger(__name__)
 
 COLUMNS = ["open", "high", "low", "close", "volume"]
 
@@ -186,35 +189,34 @@ class YFinanceFeed:
 
 
 class MT5Feed:
-    """MetaTrader 5 terminal data (Windows, ``pip install MetaTrader5``)."""
+    """MetaTrader 5 terminal data (Windows, ``pip install MetaTrader5``).
 
-    def __init__(self, symbol: str, timeframe: str) -> None:
-        import MetaTrader5 as mt5  # optional dependency
+    Candle times arrive in the broker's server clock and are converted to UTC
+    (``broker.mt5_server_time``), so sessions, killzones and news windows line up."""
 
-        self.mt5 = mt5
-        if not mt5.initialize():
-            raise RuntimeError(f"MT5 initialize() failed: {mt5.last_error()}")
+    def __init__(self, symbol: str, timeframe: str, broker: BrokerConfig | None = None) -> None:
+        from ..execution.mt5_common import ServerClock, connect, ensure_symbol, mt5_timeframe
+
+        cfg = broker or BrokerConfig()
+        self.mt5 = mt5 = connect(cfg)
         self.symbol = symbol
+        self.info = ensure_symbol(mt5, symbol)
+        self.clock = ServerClock(cfg.mt5_server_time)
+        log.info("mt5: %s server clock: %s", symbol, self.clock.detect(mt5, [symbol]))
         self.minutes = timeframe_minutes(timeframe)
-        mapping = {
-            1: mt5.TIMEFRAME_M1, 5: mt5.TIMEFRAME_M5, 15: mt5.TIMEFRAME_M15, 30: mt5.TIMEFRAME_M30,
-            60: mt5.TIMEFRAME_H1, 240: mt5.TIMEFRAME_H4, 1440: mt5.TIMEFRAME_D1,
-        }
-        if self.minutes not in mapping:
-            raise ValueError(f"MT5 feed does not support {timeframe}")
-        self.tf = mapping[self.minutes]
+        self.tf = mt5_timeframe(mt5, self.minutes)
 
     def _rates(self, count: int) -> pd.DataFrame:
         # position 1 skips the still-forming candle
         rates = self.mt5.copy_rates_from_pos(self.symbol, self.tf, 1, count)
-        if rates is None:
-            raise RuntimeError(f"MT5 copy_rates failed: {self.mt5.last_error()}")
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"MT5 copy_rates failed for {self.symbol}: {self.mt5.last_error()}")
         df = pd.DataFrame(rates)
-        df.index = pd.to_datetime(df.pop("time"), unit="s", utc=True)
+        df.index = self.clock.to_utc(df.pop("time"))
         df = df.rename(columns={"tick_volume": "volume"})
-        info = self.mt5.symbol_info(self.symbol)
-        if info is not None and "spread" in df:
-            df["spread"] = df["spread"] * info.point  # points -> price units
+        point = getattr(self.info, "point", 0) or 0
+        if point and "spread" in df:
+            df["spread"] = df["spread"] * point  # points -> price units
         return normalize(df)
 
     def history(self, bars: int) -> pd.DataFrame:
@@ -224,14 +226,14 @@ class MT5Feed:
         return self._rates(bars)
 
 
-def make_feed(m: MarketConfig) -> Feed:
+def make_feed(m: MarketConfig, broker: BrokerConfig | None = None) -> Feed:
     kind = m.feed.lower()
     if kind == "ccxt":
         return CCXTFeed(m.exchange, m.symbol, m.timeframe)
     if kind == "yfinance":
         return YFinanceFeed(m.symbol, m.timeframe)
     if kind == "mt5":
-        return MT5Feed(m.symbol, m.timeframe)
+        return MT5Feed(m.symbol, m.timeframe, broker)
     if kind == "csv":
         return CSVFeed(m.csv_path, m.timeframe or None)
     raise ValueError(f"unknown feed {m.feed!r}")

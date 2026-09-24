@@ -99,3 +99,27 @@ def test_paper_broker_guard_actions():
     ev = br.close_position("XAUUSD", "weekend: flat")
     assert ev[0]["exit_reason"] == "weekend: flat" and ev[0]["r"] > 0
     assert br.position_info("XAUUSD") is None
+
+
+def test_flatten_is_honoured_between_candles(tmp_path):
+    import threading
+    import time
+
+    a, feed = agent(tmp_path, frame(BULL_REVERSAL))
+    feed.n = 10
+    a.kill_switch_poll_s = 0.05
+    a._next_wake = lambda: 3600.0  # next candle an hour away
+    stop = threading.Event()
+    th = threading.Thread(target=a.run_forever, args=(stop,), daemon=True)
+    th.start()
+    try:
+        a.flatten_file.parent.mkdir(parents=True, exist_ok=True)
+        a.flatten_file.touch()
+        deadline = time.time() + 5
+        while not a.halted() and time.time() < deadline:
+            time.sleep(0.02)
+        assert a.halted() and not a.flatten_file.exists()
+    finally:
+        stop.set()
+        th.join(5)
+    assert not th.is_alive()

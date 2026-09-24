@@ -11,3 +11,4 @@ models/
 *.html
 config.yaml
 .env
+windows/secrets.bat

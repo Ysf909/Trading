@@ -46,6 +46,8 @@ Two tools that share one brain:
 | `smc_agent/execution/` | paper broker, ccxt broker, MT5 broker |
 | `docs/strategy.md` | the trading model in detail, scoring, research results |
 | `docs/guard.md` | every caution rule, defaults, and what the guard costs / buys |
+| `windows/` | one-click install, check, backtest, start and emergency scripts for Windows |
+| `docs/INSTALL.md` | installation guide: TradingView indicator and the MT5 bot |
 | `config.example.yaml` | XAUUSD configuration, every setting documented (`config.crypto.example.yaml` for crypto) |
 
 ## The trading model in one minute
@@ -113,6 +115,14 @@ ICT/SMC confirmation checklist and for how similar setups did on your chart. One
 (*Any alert() function call*) sends each setup to your phone with the entry, SL, TP1 and TP. See
 [tradingview/README.md](tradingview/README.md).
 
+## Installation (Windows + MetaTrader 5)
+
+Step by step, for non-programmers: **[docs/INSTALL.md](docs/INSTALL.md)**. It covers the
+TradingView indicator, preparing MT5, installing Python, the one-click installer
+(`windows\install.bat`), `windows\check.bat` (checks the terminal, account, symbol, broker clock
+and lot size without sending an order), backtesting on your broker's history, then paper, demo
+and live trading.
+
 ## Quick start: the agent
 
 ```bash
@@ -146,6 +156,7 @@ smc-agent optimize --csv btc_15m.csv --top 10
 **Look at the market now / get a Claude-written plan:**
 
 ```bash
+smc-agent -c config.yaml check                # installation check: MT5 terminal, account, symbol, lot size
 smc-agent -c config.yaml scan                 # structure, zones, liquidity, H1-W1 context, guard state
 export ANTHROPIC_API_KEY=...                  # or `ant auth login`
 smc-agent -c config.yaml brief --market XAUUSD
@@ -171,7 +182,7 @@ Everything is written to `state/journal.jsonl`. Set `TELEGRAM_BOT_TOKEN` + `TELE
 `DISCORD_WEBHOOK_URL` for notifications.
 
 Emergency controls: `touch state/HALT` stops new entries. `touch state/FLATTEN` closes everything
-and halts.
+within seconds and halts (on Windows: `windows\stop_new_trades.bat`, `windows\close_everything.bat`).
 
 ### Going live
 
@@ -179,7 +190,7 @@ and halts.
 |---|---|---|
 | Paper | `broker.kind: paper` | default; same fill rules as the backtester; state survives restarts |
 | Crypto (Binance, Bybit, OKX, …) | `kind: ccxt`, `exchange`, `market_type`, `testnet: true` | keys from `EXCHANGE_API_KEY` / `EXCHANGE_API_SECRET`; limit entry with exchange-side SL/TP |
-| **XAUUSD**, forex, CFDs, indices | `kind: mt5` + `feed: mt5` | Windows + MT5 terminal, `pip install MetaTrader5`; pending limit with native SL/TP and expiry; lot size from tick value, capped by `max_leverage`; the guard can close, cancel and move stops; live spread checked |
+| **XAUUSD**, forex, CFDs, indices | `kind: mt5` + `feed: mt5` | Windows + MT5 terminal ([install guide](docs/INSTALL.md)); pending limit with native SL/TP and expiry in the broker's clock; filling mode read from the symbol; candle times converted from the broker server clock to UTC; lot size from tick value, capped by `max_leverage`; TP1 + runner on hedging accounts; the guard can close, cancel and move stops; live spread checked |
 
 Keep `testnet: true` or a demo account until the journal shows the behaviour you expect.
 

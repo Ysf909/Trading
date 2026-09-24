@@ -221,6 +221,11 @@ class BrokerConfig:
     state_path: str = "state/paper_broker.json"
     mt5_magic: int = 909_909
     mt5_deviation: int = 20
+    mt5_path: str = ""  # terminal64.exe, only needed with several MT5 terminals installed
+    mt5_login: int = 0  # 0 = use the account the terminal is logged into
+    mt5_server: str = ""
+    mt5_password_env: str = "MT5_PASSWORD"
+    mt5_server_time: str = "auto"  # auto | ny+7 | utc | +2 ... (clock of the broker's candles)
     max_leverage: float = 20.0  # cap position notional at equity x this (MT5 sizing)
     quote_currency: str = "USDT"  # balance currency for ccxt equity
     market_type: str = "future"  # ccxt defaultType: spot | future | swap

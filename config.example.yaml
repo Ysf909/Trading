@@ -99,12 +99,17 @@ ai:
   fail_open: false
 
 broker:
-  kind: paper                 # paper | mt5 (demo account first!)
-  starting_equity: 10000
+  kind: paper                 # paper = simulated | mt5 = real orders in MetaTrader 5 (demo account first!)
+  starting_equity: 10000      # paper only
   state_path: state/paper_broker.json
-  mt5_magic: 909909
-  mt5_deviation: 30           # points
+  mt5_magic: 909909           # tags the agent's orders in MT5 (it never touches other trades)
+  mt5_deviation: 30           # points of slippage allowed on market orders
   max_leverage: 20
+  mt5_server_time: auto       # clock of your broker's candles: auto | ny+7 | utc | +2 ... (smc-agent check shows it)
+  # Optional - by default the agent uses the account the MT5 terminal is logged into:
+  # mt5_login: 12345678       # account number; the password goes in windows\secrets.bat (MT5_PASSWORD)
+  # mt5_server: YourBroker-Demo
+  # mt5_path: C:\Program Files\YourBroker MetaTrader 5\terminal64.exe   # only with several MT5 installed
 
 notify:
   telegram_token_env: TELEGRAM_BOT_TOKEN

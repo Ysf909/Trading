@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..config import BrokerConfig
@@ -21,6 +20,7 @@ from ..core.timeframes import timeframe_minutes
 from ..core.types import LONG, Bar, Signal
 from ..risk import AccountState
 from .broker import Broker
+from .mt5_common import ServerClock, allows_specified_expiry, connect, ensure_symbol, filling_for, server_time_now
 
 log = logging.getLogger(__name__)
 
@@ -43,12 +43,10 @@ class MT5Broker(Broker):
     name = "mt5"
 
     def __init__(self, cfg: BrokerConfig, tp1_r: float = 0.0, tp1_pct: float = 50.0) -> None:
-        import MetaTrader5 as mt5  # optional dependency
-
-        if not mt5.initialize():
-            raise RuntimeError(f"MT5 initialize() failed: {mt5.last_error()}")
-        self.mt5 = mt5
+        self.mt5 = connect(cfg)
         self.cfg = cfg
+        self.clock = ServerClock(cfg.mt5_server_time)
+        self._clock_checked = False
         self.tp1_r = tp1_r
         self.tp1_pct = tp1_pct
         self.tracked: dict[str, _Tracked] = {}
@@ -103,6 +101,10 @@ class MT5Broker(Broker):
         if qty <= 0:
             raise RuntimeError("position size rounds to zero lots for this stop distance")
         self.cancel_pending(sig.symbol, "replaced by a new setup")
+        info = ensure_symbol(mt5, sig.symbol)
+        if not self._clock_checked:
+            self.clock.detect(mt5, [sig.symbol])
+            self._clock_checked = True
         tick = mt5.symbol_info_tick(sig.symbol)
         if tick is None:
             raise RuntimeError(f"no tick for {sig.symbol} (market closed?)")
@@ -112,8 +114,10 @@ class MT5Broker(Broker):
             raise RuntimeError("price is already beyond the stop - setup invalidated")
         market_now = (tick.ask <= sig.entry) if long else (tick.bid >= sig.entry)
         tf_min = timeframe_minutes(sig.timeframe) if sig.timeframe else 15
-        expires = datetime.now(timezone.utc) + timedelta(minutes=tf_min * sig.expiry_bars)
-        info = mt5.symbol_info(sig.symbol)
+        # expiration is in the broker's server clock; symbols without it get GTC and the
+        # agent cancels the order itself after expiry_bars (see on_bar)
+        specified = allows_specified_expiry(mt5, info)
+        expires = server_time_now(mt5, sig.symbol, self.clock) + tf_min * 60 * sig.expiry_bars
         legs: list[tuple[float, float]] = [(float(qty), float(sig.tp))]
         acct = mt5.account_info()
         hedging = acct is not None and acct.margin_mode == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
@@ -141,12 +145,15 @@ class MT5Broker(Broker):
             }
             if market_now:  # price already at/through the entry: take it at market
                 req.update(action=mt5.TRADE_ACTION_DEAL, type=mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL,
-                           price=tick.ask if long else tick.bid, type_filling=mt5.ORDER_FILLING_IOC)
+                           price=tick.ask if long else tick.bid, type_filling=filling_for(mt5, info))
             else:
                 req.update(action=mt5.TRADE_ACTION_PENDING,
                            type=mt5.ORDER_TYPE_BUY_LIMIT if long else mt5.ORDER_TYPE_SELL_LIMIT,
-                           price=float(sig.entry), type_time=mt5.ORDER_TIME_SPECIFIED,
-                           expiration=int(expires.timestamp()), type_filling=mt5.ORDER_FILLING_RETURN)
+                           price=float(sig.entry), type_filling=mt5.ORDER_FILLING_RETURN)
+                if specified:
+                    req.update(type_time=mt5.ORDER_TIME_SPECIFIED, expiration=int(expires))
+                else:
+                    req.update(type_time=mt5.ORDER_TIME_GTC)
             res = mt5.order_send(req)
             if res is None or res.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
                 for tk in tickets:  # never leave half a trade behind
@@ -190,7 +197,7 @@ class MT5Broker(Broker):
                 "type": mt5.ORDER_TYPE_SELL if buy else mt5.ORDER_TYPE_BUY,
                 "price": tick.bid if buy else tick.ask, "deviation": self.cfg.mt5_deviation,
                 "magic": self.cfg.mt5_magic, "comment": f"smc exit: {reason}"[:31],
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": filling_for(mt5, mt5.symbol_info(symbol)),
             }
             return self._send(req, f"close {p.ticket}")
         return False
@@ -258,6 +265,8 @@ class MT5Broker(Broker):
         if tr.status == "pending":
             if waiting and not live:
                 sig = tr.signal
+                if t - sig.bar > sig.expiry_bars:
+                    return self.cancel_pending(symbol, "expired")
                 reached_tp = bar.high >= sig.tp if sig.direction == LONG else bar.low <= sig.tp
                 if reached_tp:
                     return self.cancel_pending(symbol, "missed: target traded before the fill")

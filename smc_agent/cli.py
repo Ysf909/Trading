@@ -7,6 +7,7 @@
     brief      ask Claude for an ICT-style trading plan for a market
     run        start the autonomous agent (paper by default)
     webhook    execute setups sent by the TradingView indicator
+    check      verify the installation (config, MT5 terminal, account, symbol) - sends no orders
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def load_data(args: argparse.Namespace, cfg: AppConfig) -> tuple[pd.DataFrame, s
     m = _market(cfg, args.market)
     if args.timeframe:
         m = MarketConfig(**{**asdict(m), "timeframe": args.timeframe})
-    df = make_feed(m).history(args.bars or 5000)
+    df = make_feed(m, cfg.broker).history(args.bars or 5000)
     return df, m.symbol, m.timeframe
 
 
@@ -240,6 +241,17 @@ def cmd_webhook(args: argparse.Namespace, cfg: AppConfig) -> None:
     agent.run_forever()
 
 
+def cmd_check(args: argparse.Namespace, cfg: AppConfig) -> None:
+    from .doctor import Doctor
+
+    doc = Doctor(cfg)
+    doc.run()
+    print(f"SMC agent check - {args.config or 'default settings'}\n")
+    print(doc.report())
+    if doc.failed:
+        raise SystemExit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="smc-agent", description="SMC / ICT trading agent")
     p.add_argument("-c", "--config", help="YAML config (see config.example.yaml)")
@@ -291,6 +303,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("webhook", help="receive TradingView alerts")
     sp.set_defaults(func=cmd_webhook)
+
+    sp = sub.add_parser("check", help="verify the installation before trading (sends no orders)")
+    sp.set_defaults(func=cmd_check)
     return p
 
 

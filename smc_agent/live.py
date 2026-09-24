@@ -94,6 +94,7 @@ class TradingAgent:
         self.lock = threading.RLock()
         state_dir = Path(cfg.journal_path).parent
         self.halt_file = state_dir / "HALT"
+        self.kill_switch_poll_s = 5.0
         self.flatten_file = state_dir / "FLATTEN"
 
         self.model = model
@@ -115,7 +116,7 @@ class TradingAgent:
 
         self.markets: list[MarketRuntime] = []
         for m in cfg.markets:
-            feed = (feeds or {}).get(m.symbol) or make_feed(m)
+            feed = (feeds or {}).get(m.symbol) or make_feed(m, cfg.broker)
             eng = SMCEngine(cfg.strategy, m.symbol, m.timeframe)
             guard = Guard(g, cfg.strategy, self.calendar) if g.enabled else None
             self.markets.append(MarketRuntime(m, feed, eng, guard, timeframe_minutes(m.timeframe)))
@@ -415,10 +416,13 @@ class TradingAgent:
         self.warmup()
         log.info("agent running on %d market(s) with %s broker", len(self.markets), self.broker.name)
         while not stop.is_set():
-            wait = self._next_wake()
-            if stop.wait(wait):
+            deadline = time.time() + self._next_wake()
+            while not stop.is_set() and time.time() < deadline:
+                # the emergency switch (state/FLATTEN) is honoured within seconds, not at the next candle
+                stop.wait(min(self.kill_switch_poll_s, max(0.0, deadline - time.time())))
+                self.check_kill_switch()
+            if stop.is_set():
                 break
-            self.check_kill_switch()
             self.refresh_calendar()
             for m in self.markets:
                 try:
