@@ -1,0 +1,95 @@
+# SMC / ICT agent configuration. Copy to config.yaml and edit.
+# Every key is optional - anything left out uses the default shown here.
+
+markets:
+  - symbol: BTC/USDT          # ccxt symbol (or yfinance ticker e.g. EURUSD=X, or MT5 symbol e.g. EURUSD)
+    timeframe: 15m
+    feed: ccxt                # ccxt | yfinance | mt5 | csv
+    exchange: binance         # any ccxt exchange id (public data needs no API key)
+    tv_symbol: BTCUSDT        # TradingView ticker - used to route webhook alerts
+  # - symbol: EURUSD=X
+  #   timeframe: 1h
+  #   feed: yfinance
+  #   tv_symbol: EURUSD
+
+strategy:                     # same names as the TradingView indicator inputs
+  swing_len: 20               # swing structure pivot strength
+  internal_len: 5             # internal structure (MSS) pivot strength
+  atr_len: 14
+  fvg_min_atr: 0.1            # ignore gaps smaller than 0.1 x ATR
+  models: both                # reversal | continuation | both
+  mss_window: 20              # bars from the liquidity sweep to the market-structure shift
+  fvg_wait: 3                 # bars to wait for a displacement FVG before using the order block
+  use_ob_entry: true
+  entry_mode: ce              # ce = 50% of the FVG/OB (consequent encroachment), edge = proximal edge
+  entry_expiry: 20            # bars a limit order stays alive
+  sl_buffer_atr: 0.1          # stop beyond the sweep / protected swing by 0.1 x ATR
+  min_risk_atr: 0.25
+  max_risk_atr: 4.0
+  tp_mode: liquidity          # liquidity = nearest opposing pool with RR >= min_rr, fixed = rr_target
+  rr_target: 2.0
+  min_rr: 1.5
+  max_rr: 6.0
+  breakeven_at_r: 0.0         # 0 = off
+  htf_minutes: 0              # 0 = auto (1m->15m, 5m->1h, 15m/1h->4h, 4h->1D, 1D->1W)
+  htf_len: 5
+  htf_filter: false           # true = only trade with the higher-timeframe bias
+  killzone_filter: false      # true = only arm setups inside the killzones below
+  killzones: [london, ny_am, ny_pm]
+  displacement_atr: 1.0
+  min_score: 6                # 0-10 confluence score; 6 = grade A and better
+  day_tz: UTC                 # timezone for previous-day high/low (forex brokers: America/New_York)
+
+risk:
+  risk_per_trade_pct: 0.5
+  max_daily_loss_pct: 2.0
+  max_open_positions: 3
+  max_trades_per_day: 6
+  one_position_per_symbol: true
+  min_rr: 1.5
+
+costs:                        # used by backtests and the paper broker
+  commission_pct: 0.02        # per side; crypto maker ~0.02, forex ~0.003, stocks ~0.01
+  slippage_pct: 0.0
+
+learner:                      # the agent's own school: train with `smc-agent train`
+  enabled: false
+  model_path: models/edge_model.json
+  min_expected_r: 0.05        # take a setup only if learned p*RR - (1-p) >= this
+
+ai:                           # Claude reviews every setup before it is executed
+  enabled: false              # needs `pip install anthropic` and ANTHROPIC_API_KEY
+  model: claude-opus-5
+  effort: high                # low | medium | high | xhigh | max
+  min_confidence: 0.55
+  bars_context: 80
+  timeout_s: 120
+  fail_open: false            # if the API is down: false = skip the trade
+
+broker:
+  kind: paper                 # paper | ccxt | mt5
+  starting_equity: 10000
+  state_path: state/paper_broker.json
+  exchange: binance           # ccxt only
+  market_type: future         # ccxt only: spot | future | swap
+  testnet: true               # ccxt only - keep true until you have verified everything
+  quote_currency: USDT
+  api_key_env: EXCHANGE_API_KEY
+  api_secret_env: EXCHANGE_API_SECRET
+  mt5_magic: 909909
+  mt5_deviation: 20
+
+notify:                       # optional; set the env vars to enable
+  telegram_token_env: TELEGRAM_BOT_TOKEN
+  telegram_chat_id_env: TELEGRAM_CHAT_ID
+  discord_webhook_env: DISCORD_WEBHOOK_URL
+
+webhook:                      # `smc-agent webhook` - executes TradingView indicator alerts
+  host: 0.0.0.0
+  port: 8080
+  passphrase_env: WEBHOOK_PASSPHRASE
+  execute: true
+
+journal_path: state/journal.jsonl
+warmup_bars: 1000
+poll_delay_s: 5

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smc-agent"
+version = "1.0.0"
+description = "SMC / ICT trading agent: structure, order blocks, FVGs, liquidity, AI review, backtesting and execution"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+ai = ["anthropic>=1.0"]
+crypto = ["ccxt>=4.0"]
+stocks = ["yfinance>=0.2"]
+mt5 = ["MetaTrader5>=5.0.45"]
+chart = ["plotly>=5.0"]
+all = ["anthropic>=1.0", "ccxt>=4.0", "yfinance>=0.2", "plotly>=5.0"]
+dev = ["pytest>=7", "pyarrow>=14"]
+
+[project.scripts]
+smc-agent = "smc_agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["smc_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
