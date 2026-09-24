@@ -114,4 +114,7 @@ smc-agent -c config.example.yaml scan --csv OANDA_XAUUSD_15.csv                #
 ```
 
 For backtests with real news, export a calendar to CSV (`time,currency,impact,title`, ISO time
-with timezone) and set `guard.news_file`.
+with timezone; impact `high`, `medium`, `low` or `holiday`) and set `guard.news_file`. The format
+is shown in `examples/news_events.example.csv` (its dates are illustrative only, so always use
+the official schedule). The same file is merged with the live feed, which is useful for events
+the feed misses.
