@@ -13,10 +13,10 @@ from .core.types import LONG
 from .execution.sim import Trade
 
 COLORS = {
-    "bull_ob": "rgba(41, 98, 255, 0.22)",
-    "bear_ob": "rgba(255, 109, 0, 0.22)",
-    "bull_fvg": "rgba(0, 200, 83, 0.20)",
-    "bear_fvg": "rgba(213, 0, 0, 0.18)",
+    "bull_ob": "rgba(41, 98, 255, 0.13)",
+    "bear_ob": "rgba(255, 109, 0, 0.13)",
+    "bull_fvg": "rgba(0, 200, 83, 0.16)",
+    "bear_fvg": "rgba(213, 0, 0, 0.14)",
     "bull": "#089981",
     "bear": "#f23645",
     "liq": "#9c27b0",
@@ -33,6 +33,7 @@ def render_chart(
     last_n: int = 400,
     title: str = "",
     include_plotlyjs: str | bool = "cdn",
+    internal_obs: bool = False,
 ) -> Path:
     try:
         import plotly.graph_objects as go
@@ -72,6 +73,8 @@ def render_chart(
         end = z.end if z.end >= 0 else last
         if end < start or not visible(z.top, z.bottom):
             continue
+        if z.kind == "OB" and z.level != "swing" and not internal_obs:
+            continue  # same default as the TradingView indicator
         key = ("bull_" if z.direction == LONG else "bear_") + z.kind.lower()
         shapes.append(dict(
             type="rect", x0=x(max(z.bar, start)), x1=x(end), y0=z.bottom, y1=z.top,
