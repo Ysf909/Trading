@@ -7,13 +7,13 @@ import pytest
 
 from smc_agent.backtest import run_backtest
 from smc_agent.config import GuardConfig, StrategyConfig
-from smc_agent.core.engine import SMCEngine, bars_from_df
+from smc_agent.core.engine import bars_from_df
 from smc_agent.core.mtf import MTFContext, TFTracker
 from smc_agent.core.sessions import PeriodLevels
 from smc_agent.core.timeframes import Bucketer
 from smc_agent.core.types import Bar, LiquidityLevel, Signal
 from smc_agent.guard import Guard, apply_decision
-from smc_agent.news import NewsCalendar, NewsEvent
+from smc_agent.news import NewsCalendar
 
 from .conftest import gold_like
 

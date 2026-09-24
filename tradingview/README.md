@@ -26,10 +26,12 @@ the BUY/SELL setups on your chart are the setups the agent trades.
 | purple ✕ | liquidity sweep (hover for details) |
 | Premium / Discount boxes + dotted EQ | current swing dealing range |
 | background shading | killzones (London blue, NY AM green, NY PM orange, London close purple, Asia grey) |
-| **BUY A** / **SELL A+** labels | a setup armed; hover for the full reasoning, entry, stop, target and score |
+| **BUY A** / **SELL A+** labels | a setup armed and allowed by the risk guard; hover for the full reasoning, entry, stop, (capped) target and score |
+| grey **BUY?** / **SELL?** | a setup the risk guard refused; hover to see every reason (don't take it manually either) |
+| small grey `x` | a pending order the guard cancelled (news, session, shock, streak) |
 | dashed grey / red / green lines | pending limit entry, stop, target (valid for *Limit order valid* bars) |
 | green / red boxes + `+2.3R` | the tracked trade from fill to exit and its result |
-| dashboard | HTF bias, structure, premium/discount %, killzone, setup state, open trade, live stats |
+| dashboard | every higher timeframe (trend + position in its range), structure, premium/discount %, killzone, **guard status**, volatility vs normal and vs ADR, setup state, open trade, live stats, today / week / drawdown in R |
 
 ## The entry models
 
@@ -48,7 +50,35 @@ major liquidity swept 1 · OB+FVG overlap 1 · inside a scoring killzone 1 · di
 swing trend aligned 1 · RR ≥ 3 1. Grades: A+ ≥ 8, A ≥ 6, B ≥ 4. Only setups with score ≥ *Min
 confluence score* (default 6) arm.
 
-## Recommended settings
+## The risk guard
+
+On by default, same rules as the Python agent (see [docs/guard.md](../docs/guard.md)):
+
+* **Top-down timeframes:** four higher timeframes (default H1, H4, D, W, only those above your
+  chart). It never trades against *Never trade against* (D). It trades against *Against only from
+  discount / premium* (H4) only from the correct half of its range. It won't buy the top 10% / sell
+  the bottom 10% of those ranges, or enter inside an opposing HTF FVG. Targets are capped before
+  PDH/PDL, PWH/PWL, HTF swings and HTF FVGs, or the setup is refused.
+* **News:** the typical US release times (08:30, 10:00, 14:00 NY) are always avoided. Pine has no
+  economic calendar, so each week tick *High-impact event 1-3* and pick the times of the red-folder
+  USD events (NFP, CPI, FOMC, …). Entries are blocked around them, pending orders cancelled, and
+  the tracked trade is closed (or protected) before them.
+* **Abnormal volatility:** a candle or gap over 4× the normal range pauses for 90 minutes. It stands
+  aside above 2.5× normal volatility and won't take new entries once the day has moved 1.3× its ADR.
+* **Sessions (XAUUSD / forex):** rollover 16:45–18:30 NY, Friday after 14:00, Sunday before 19:00
+  and holidays are blocked, and the trade is flattened Friday 16:00. Choose *24/7* for crypto.
+* **Streaks:** pause after 3 losses, daily −3R and weekly −6R limits, halt at −12R drawdown.
+
+Alerts *Setup blocked by guard* and *Guard acted on trade* tell you when it steps in.
+
+## Recommended settings for XAUUSD
+
+* Chart: M15 (or M5) on OANDA:XAUUSD / your broker's gold feed.
+* Keep the guard on; enter the week's high-impact USD events every Sunday.
+* *Stop buffer* 0.2 ATR (gold sweeps obvious levels). Killzones: London + New York AM score.
+* *Only trade inside scoring killzones* is a good extra filter for gold.
+
+## Recommended settings (other markets)
 
 | Market | Timeframe | Notes |
 |---|---|---|

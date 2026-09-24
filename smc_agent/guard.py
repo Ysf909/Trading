@@ -108,6 +108,7 @@ class Guard:
     # ------------------------------------------------------------ bar updates
     def begin_bar(self, bar: Bar) -> None:
         """Call before trades are stepped with ``bar`` (rolls day / week P&L)."""
+        self.t += 1
         dk, wk = self._day.key(bar.time), self._week.key(bar.time)
         if dk != self.day_key:
             self.day_key, self.day_r = dk, 0.0

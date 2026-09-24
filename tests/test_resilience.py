@@ -1,6 +1,6 @@
 """Unexpected-scenario tests for the live agent (no network, no real broker)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd

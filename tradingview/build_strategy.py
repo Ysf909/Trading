@@ -31,12 +31,13 @@ RISK_INPUT = (
 HOOKS = {
     "//@@ARM": [
         'strategy.cancel("SMC")',
-        "float qtyUnits = strategy.equity * riskPct / 100 / math.abs(e - sl)",
+        "float qtyUnits = strategy.equity * riskPct / 100 / math.abs(e - sl) * sizeMult",
         'strategy.entry("SMC", pick == 1 ? strategy.long : strategy.short, qty = qtyUnits, limit = e)',
         'strategy.exit("SMC exit", from_entry = "SMC", stop = sl, limit = tp)',
     ],
     "//@@CANCEL": ['strategy.cancel("SMC")'],
     "//@@BE": ['strategy.exit("SMC exit", from_entry = "SMC", stop = cur.slCur, limit = cur.tp)'],
+    "//@@GUARDCLOSE": ['strategy.close("SMC", comment = gActWhy)'],
 }
 
 

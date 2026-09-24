@@ -13,7 +13,7 @@ the TradingView indicator runs the identical logic.
 | BOS / CHoCH | a close through the latest unbroken pivot; CHoCH if it flips the prior trend, else BOS |
 | Order block | on every break: the candle with the lowest low (bullish) / highest high (bearish) between the broken pivot and the break |
 | Fair value gap | three-candle imbalance: `low[t] > high[t-2]` with the middle candle closing beyond `high[t-2]`, size ≥ 0.1 ATR (mirrored for bearish) |
-| Liquidity | resting beyond internal & swing pivots, equal highs/lows (within 0.1 ATR), previous-day high/low, Asia and London session high/low |
+| Liquidity | resting beyond internal & swing pivots, equal highs/lows (within 0.1 ATR), previous-day and previous-week high/low, Asia and London session high/low |
 | Sweep | a candle trades through a tracked level (the level is then removed) |
 | Premium / discount | above / below the midpoint of the trailing swing range |
 | HTF bias | swing structure (pivot 5) of completed higher-timeframe candles; auto 1m→15m, 5m→1H, 15m/1H→4H, 4H→D, D→W |
@@ -87,6 +87,11 @@ between markets. That is why the agent ships with:
   validated) and filters trades by expected R;
 * paper trading by default.
 
+The risk guard (next to these rules, not part of them) cuts the default A-grade results from
+192 to 64 trades, lifts the average from +0.51R to +0.85R and halves drawdowns. See
+[guard.md](guard.md). (The "no guard" numbers are slightly different from the table above because
+previous-week levels were added as liquidity afterwards.)
+
 ## 5. The learner
 
 `smc_agent/ai/learner.py` fits `P(target before stop)` from the setup's confluence flags, reward:risk
@@ -97,8 +102,10 @@ each market and tested on the last 30%: all setups +0.23R/trade (185 trades), mo
 
 ## 6. The Claude reviewer
 
-With `ai.enabled`, every setup that passes the rules, learner and risk checks is sent to Claude
-with the engine's market snapshot (structure, PD arrays, liquidity map, HTF bias, session) and the
-last 80 candles. Claude answers `take`, `reduce` (half size) or `skip`, with its bias, draw on
+With `ai.enabled`, every setup that passes the rules, learner, risk guard and risk checks is sent
+to Claude with the engine's market snapshot (structure, PD arrays, liquidity map, HTF bias,
+session), the guard's risk context (H1/H4/D1/W1 trend and range position, unbroken HTF swings and
+unfilled HTF gaps, upcoming news, volatility regime and recent shocks, day range vs ADR, streak
+state) and the last 80 candles. Claude answers `take`, `reduce` (half size) or `skip`, with its bias, draw on
 liquidity, reasoning and risks — it can veto or downsize, never move prices. Unavailable API → the
 trade is skipped (`fail_open: false`).
