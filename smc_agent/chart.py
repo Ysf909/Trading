@@ -4,7 +4,7 @@ FVGs, liquidity, sweeps, signals and trades (requires ``plotly``)."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -34,6 +34,7 @@ def render_chart(
     title: str = "",
     include_plotlyjs: str | bool = "cdn",
     internal_obs: bool = False,
+    blocked: Iterable[tuple[Any, list[str]]] = (),
 ) -> Path:
     try:
         import plotly.graph_objects as go
@@ -171,6 +172,18 @@ def render_chart(
     fig.update_xaxes(tickvals=ticks, ticktext=[df.index[i].strftime("%m-%d %H:%M") for i in ticks],
                      range=[start - 1, last + max(8, (n - start) // 12)])
     fig.update_yaxes(range=[y_lo, y_hi])
+    refused = [(sg, why) for sg, why in blocked if sg.bar >= start]
+    if refused:
+        fig.add_trace(go.Scatter(
+            x=[x(sg.bar) for sg, _ in refused],
+            y=[df["low"].iloc[sg.bar] if sg.direction == LONG else df["high"].iloc[sg.bar] for sg, _ in refused],
+            mode="markers", name="blocked by guard",
+            marker=dict(symbol=["triangle-up-open" if sg.direction == LONG else "triangle-down-open" for sg, _ in refused],
+                        size=10, color="#9e9e9e"),
+            text=[f"{sg.side} {sg.model} {sg.grade} - blocked:<br>" + "<br>".join(why) for sg, why in refused],
+            hoverinfo="text",
+        ))
+
     fig.update_layout(
         title=title or f"{engine.symbol} {engine.timeframe} - SMC/ICT agent",
         shapes=shapes, annotations=annotations, template="plotly_white",

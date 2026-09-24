@@ -162,7 +162,7 @@ def cmd_backtest(args: argparse.Namespace, cfg: AppConfig) -> None:
         from .chart import render_chart
 
         out = render_chart(df, res.engine, res.trades + res.cancelled, args.chart, last_n=args.chart_bars,
-                           include_plotlyjs="cdn" if not args.offline_chart else True)
+                           include_plotlyjs="cdn" if not args.offline_chart else True, blocked=res.blocked)
         print(f"chart -> {out}")
 
 
