@@ -37,6 +37,16 @@ or is it a choppy break inside a range?
 - What sits between entry and target (opposing order blocks, gaps, untaken liquidity)?
 - Is the stop protected, or resting where liquidity will obviously be hunted?
 - Session and timing.
+- The risk context: the higher-timeframe picture (trend, premium/discount, unbroken swings and \
+unfilled gaps on H1/H4/D1/W1), upcoming news, the volatility regime and recent shocks, today's \
+range versus its average, and the losing-streak state. The rules engine and a risk guard have \
+already filtered this setup; look for what they cannot see - e.g. a target that needs to break a \
+level that has rejected price repeatedly, a trade straight into a news release, or a market that \
+is chopping around its equilibrium.
+
+For XAUUSD specifically: gold hunts stops aggressively around the London and New York opens and \
+US data releases (08:30 / 10:00 NY), spreads widen around the 17:00 NY rollover, and it can gap \
+over weekends; favour setups whose stop sits beyond real liquidity rather than an obvious swing.
 
 Most mechanical setups are average; reserve "take" for setups where the context clearly \
 supports the idea, use "reduce" when the idea is valid but the context is mixed, and "skip" \
@@ -48,8 +58,10 @@ actionable plan for a discretionary trader, from the structured market state and
 are given. Cover: higher-timeframe bias; the current dealing range and whether price is in \
 premium or discount; the most likely draw on liquidity; the key PD arrays and liquidity levels \
 (with prices); a primary and an alternative scenario, each with the trigger that confirms it, \
-entry area, invalidation and target; and what would make you stand aside. Use only levels that \
-appear in the data. Format as short markdown sections."""
+entry area, invalidation and target; and what would make you stand aside. Read every timeframe \
+you are given top-down (W1 -> D1 -> H4 -> H1 -> entry TF) and say where they conflict. Call out \
+the risks: upcoming news, volatility shocks, an extended day, the weekend or the rollover. Use \
+only levels that appear in the data. Format as short markdown sections."""
 
 REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -101,7 +113,8 @@ class ClaudeAnalyst:
         return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
     # ---------------------------------------------------------------- review
-    def review(self, sig: Signal, engine: SMCEngine | None = None) -> dict[str, Any] | None:
+    def review(self, sig: Signal, engine: SMCEngine | None = None,
+               context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Return the review dict, or ``None`` if the call failed or was refused."""
         payload: dict[str, Any] = {
             "proposed_trade": {
@@ -129,6 +142,8 @@ class ClaudeAnalyst:
         if engine is not None:
             payload["market_state"] = engine.snapshot()
             payload["recent_candles"] = engine.recent_bars(self.cfg.bars_context)
+        if context:
+            payload.update(context)
         content = "Review this setup.\n\n" + json.dumps(payload, default=str)
         try:
             resp = self._create(REVIEW_SYSTEM, content, {"type": "json_schema", "schema": REVIEW_SCHEMA})
@@ -164,11 +179,13 @@ class ClaudeAnalyst:
         return True, (0.5 if decision == "reduce" else 1.0), f"AI {decision} ({conf:.2f})"
 
     # ----------------------------------------------------------------- brief
-    def brief(self, engine: SMCEngine) -> str:
-        payload = {
+    def brief(self, engine: SMCEngine, context: dict[str, Any] | None = None) -> str:
+        payload: dict[str, Any] = {
             "market_state": engine.snapshot(max_items=8),
             "recent_candles": engine.recent_bars(max(self.cfg.bars_context, 120)),
         }
+        if context:
+            payload.update(context)
         resp = self._create(BRIEF_SYSTEM, "Write the trading plan.\n\n" + json.dumps(payload, default=str), None)
         if resp.stop_reason == "refusal":
             return "The model declined to produce a brief for this request."

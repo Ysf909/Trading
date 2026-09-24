@@ -148,6 +148,11 @@ def step(trade: Trade, bar: Bar, t: int, breakeven_at_r: float = 0.0) -> str | N
     return None
 
 
+def force_close(trade: Trade, price: float, t: int, time: datetime, reason: str) -> None:
+    """Close an open position at ``price`` (guard exits: weekend, news, structure)."""
+    _close(trade, price, t, time, reason)
+
+
 def settle(trade: Trade, commission_pct: float, slippage_pct: float = 0.0) -> None:
     """Fill in fees and money PnL for a closed trade (qty must be set)."""
     if trade.status != "closed":

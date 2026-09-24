@@ -11,7 +11,7 @@ import pytest
 from smc_agent.ai.analyst import ClaudeAnalyst
 from smc_agent.ai.learner import EdgeModel, train_walk_forward
 from smc_agent.backtest import collect_outcomes
-from smc_agent.config import AIConfig, AppConfig, MarketConfig, RiskConfig, StrategyConfig, load_config
+from smc_agent.config import AIConfig, AppConfig, GuardConfig, MarketConfig, RiskConfig, StrategyConfig, load_config
 from smc_agent.core.engine import SMCEngine, bars_from_df
 from smc_agent.core.types import Signal
 from smc_agent.execution.broker import PaperBroker
@@ -147,7 +147,7 @@ class FrameFeed:
 
 def _agent(tmp_path, tiny_cfg, df, **kw):
     cfg = AppConfig(markets=[MarketConfig(symbol="TEST/USDT", timeframe="15m", feed="csv", tv_symbol="TESTUSDT")],
-                    strategy=tiny_cfg, journal_path=str(tmp_path / "j.jsonl"))
+                    strategy=tiny_cfg, guard=GuardConfig(enabled=False), journal_path=str(tmp_path / "j.jsonl"))
     feed = FrameFeed(df)
     agent = TradingAgent(cfg, broker=PaperBroker(10_000), feeds={"TEST/USDT": feed}, **kw)
     return agent, feed

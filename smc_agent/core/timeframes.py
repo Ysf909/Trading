@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from functools import lru_cache
+from zoneinfo import ZoneInfo
+
 _UNITS = {"m": 1, "h": 60, "d": 1440, "w": 10080}
 
 
@@ -32,3 +36,50 @@ def auto_htf_minutes(chart_minutes: int) -> int:
     if chart_minutes <= 240:
         return 1440
     return 10080
+
+
+def timeframe_label(minutes: int) -> str:
+    if minutes % 10080 == 0:
+        return "W" if minutes == 10080 else f"{minutes // 10080}W"
+    if minutes % 1440 == 0:
+        return "D" if minutes == 1440 else f"{minutes // 1440}D"
+    if minutes % 60 == 0:
+        return f"H{minutes // 60}"
+    return f"M{minutes}"
+
+
+@lru_cache(maxsize=256)
+def _shifted_local(ts: float, tz: str, shift_h: int) -> datetime:
+    local = datetime.fromtimestamp(ts, ZoneInfo(tz)).replace(tzinfo=None)
+    return local + timedelta(hours=shift_h)
+
+
+_EPOCH = datetime(1970, 1, 1)
+
+
+class Bucketer:
+    """Assigns bars to higher-timeframe candles the way a broker builds them.
+
+    ``tz`` + ``roll_hour`` define when a trading day starts in local time. The
+    default (UTC, 0) gives plain UTC candles (crypto). XAUUSD / forex brokers
+    and TradingView use New York 17:00: ``Bucketer(1440, "America/New_York", 17)``
+    makes the Monday-17:00 -> Tuesday-17:00 session one daily candle, H4 candles
+    start at 17, 21, 01, ... NY and weekly candles start Sunday 17:00 NY.
+    """
+
+    def __init__(self, minutes: int, tz: str = "UTC", roll_hour: int = 0) -> None:
+        self.minutes = minutes
+        self.tz = tz
+        self.shift = (24 - roll_hour) % 24
+
+    def local(self, t: datetime) -> datetime:
+        return _shifted_local(t.timestamp(), self.tz, self.shift)
+
+    def key(self, t: datetime) -> int:
+        loc = self.local(t)
+        if self.minutes >= 10080:
+            y, w, _ = loc.date().isocalendar()
+            return y * 100 + w
+        if self.minutes % 1440 == 0:
+            return loc.date().toordinal() // (self.minutes // 1440)
+        return int((loc - _EPOCH).total_seconds() // (self.minutes * 60))

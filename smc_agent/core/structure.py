@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .timeframes import Bucketer
 from .types import LONG, SHORT, Bar, Pivot, StructureEvent
 
 
@@ -140,11 +141,8 @@ class HTFBias:
     Pine port gets from ``request.security(..., expr[1], lookahead_on)``.
     """
 
-    WEEK = 7 * 86400
-    MONDAY_OFFSET = 3 * 86400  # 1970-01-01 was a Thursday
-
-    def __init__(self, minutes: int, n: int) -> None:
-        self.seconds = minutes * 60
+    def __init__(self, minutes: int, n: int, tz: str = "UTC", roll_hour: int = 0) -> None:
+        self.bucketer = Bucketer(minutes, tz, roll_hour)
         self.tracker = StructureTracker(n, "htf")
         self.highs: list[float] = []
         self.lows: list[float] = []
@@ -152,13 +150,8 @@ class HTFBias:
         self._key: int | None = None
         self._bar: Bar | None = None
 
-    def _bucket(self, ts: float) -> int:
-        if self.seconds == self.WEEK:
-            return int((ts + self.MONDAY_OFFSET) // self.WEEK)
-        return int(ts // self.seconds)
-
     def update(self, bar: Bar) -> int:
-        key = self._bucket(bar.time.timestamp())
+        key = self.bucketer.key(bar.time)
         if self._key is None:
             self._key = key
             self._bar = Bar(bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume)

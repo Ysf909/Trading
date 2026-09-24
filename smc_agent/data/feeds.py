@@ -28,9 +28,15 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     idx = pd.to_datetime(df.index)
     idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
     df.index = idx
-    df = df[COLUMNS].astype(float)
+    cols = COLUMNS + (["spread"] if "spread" in df.columns else [])
+    df = df[cols].astype(float)
     df = df[~df.index.duplicated(keep="last")].sort_index()
-    return df.dropna()
+    df = df.dropna(subset=["open", "high", "low", "close"])
+    # bad ticks: non-positive prices are dropped, inconsistent high/low repaired
+    df = df[(df[["open", "high", "low", "close"]] > 0).all(axis=1)]
+    df["high"] = df[["open", "high", "low", "close"]].max(axis=1)
+    df["low"] = df[["open", "high", "low", "close"]].min(axis=1)
+    return df
 
 
 def load_csv(path: str | Path) -> pd.DataFrame:
@@ -206,6 +212,9 @@ class MT5Feed:
         df = pd.DataFrame(rates)
         df.index = pd.to_datetime(df.pop("time"), unit="s", utc=True)
         df = df.rename(columns={"tick_volume": "volume"})
+        info = self.mt5.symbol_info(self.symbol)
+        if info is not None and "spread" in df:
+            df["spread"] = df["spread"] * info.point  # points -> price units
         return normalize(df)
 
     def history(self, bars: int) -> pd.DataFrame:

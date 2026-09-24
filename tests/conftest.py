@@ -50,3 +50,37 @@ def random_walk(n=3000, seed=0, freq="15min") -> pd.DataFrame:
         "open": open_, "high": np.maximum(open_, close) + wick[:, 0],
         "low": np.minimum(open_, close) - wick[:, 1], "close": close, "volume": 1.0,
     }, index=idx)
+
+
+def gold_like(days=45, seed=0, spike_every=7, start="2026-06-01") -> pd.DataFrame:
+    """Synthetic XAUUSD-style M15 data: broker hours (Sunday 18:00 -> Friday 17:00
+    NY, daily 17:00-18:00 break), quiet Asia, active London / NY, trend regimes
+    and an occasional 08:30 NY news spike."""
+    from zoneinfo import ZoneInfo
+
+    ny = ZoneInfo("America/New_York")
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range(pd.Timestamp(start, tz=ny), periods=days * 96, freq="15min")
+    rows, times = [], []
+    price, drift, day_n = 2400.0, 0.0, 0
+    for ts in idx:
+        wd, h, m = ts.weekday(), ts.hour, ts.minute
+        closed = (wd == 4 and h >= 17) or wd == 5 or (wd == 6 and h < 18) or h == 17
+        if closed:
+            continue
+        if h == 18 and m == 0:
+            day_n += 1
+            drift = rng.normal(0, 0.08)
+        vol = 0.6 if (h >= 19 or h < 2) else 1.6 if 2 <= h < 11 else 1.0
+        o = price
+        c = o + drift + rng.normal(0, vol)
+        if spike_every and day_n % spike_every == 3 and h == 8 and m == 30 and wd < 5:
+            c = o + rng.choice([-1, 1]) * rng.uniform(12, 20)  # news candle
+        hi = max(o, c) + abs(rng.normal(0, vol * 0.5))
+        lo = min(o, c) - abs(rng.normal(0, vol * 0.5))
+        rows.append((o, hi, lo, c))
+        times.append(ts.tz_convert("UTC"))
+        price = c
+    df = pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=pd.DatetimeIndex(times))
+    df["volume"] = 1.0
+    return df

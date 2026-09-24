@@ -81,15 +81,56 @@ def _datasets(args: argparse.Namespace, cfg: AppConfig) -> list[tuple[pd.DataFra
     return out
 
 
+def _guard(args: argparse.Namespace, cfg: AppConfig):
+    """(guard config or None, calendar for backtests) - history needs a CSV, the live feed is weekly."""
+    from .news import NewsCalendar
+
+    if getattr(args, "no_guard", False) or not cfg.guard.enabled:
+        return None, None
+    cal = None
+    if cfg.guard.news and cfg.guard.news_file and Path(cfg.guard.news_file).exists():
+        cal = NewsCalendar.from_csv(cfg.guard.news_file)
+    return cfg.guard, cal
+
+
+def _run_guarded(df: pd.DataFrame, cfg: AppConfig, symbol: str, tf: str, args: argparse.Namespace):
+    """Replay ``df`` through engine + guard; returns (engine, guard, recent signals with decisions)."""
+    from .core.engine import SMCEngine, bars_from_df
+    from .guard import Guard
+
+    gcfg, cal = _guard(args, cfg)
+    eng = SMCEngine(cfg.strategy, symbol, tf)
+    grd = Guard(gcfg, cfg.strategy, cal) if gcfg is not None else None
+    last: list = []
+    for bar in bars_from_df(df):
+        if grd is not None:
+            grd.begin_bar(bar)
+        sigs = eng.update(bar)
+        if grd is not None:
+            grd.on_bar(bar, eng)
+        if sigs:
+            last = [(s, grd.check(s, eng, bar.spread or None) if grd is not None else None) for s in sigs]
+    return eng, grd, last
+
+
 def _apply_overrides(cfg: AppConfig, sets: list[str]) -> None:
     overrides: dict[str, Any] = {}
+    guard_over: dict[str, Any] = {}
     for item in sets or []:
         if "=" not in item:
             raise SystemExit(f"--set expects key=value, got {item!r}")
         k, v = item.split("=", 1)
-        overrides[k.removeprefix("strategy.")] = yaml.safe_load(v)
+        if k.startswith("guard."):
+            guard_over[k.removeprefix("guard.")] = yaml.safe_load(v)
+        else:
+            overrides[k.removeprefix("strategy.")] = yaml.safe_load(v)
     if overrides:
         cfg.strategy = strategy_from_overrides(cfg.strategy, overrides)
+    if guard_over:
+        from dataclasses import replace
+
+        cfg.guard = replace(cfg.guard, **guard_over)
+        cfg.guard.validate()
 
 
 # ----------------------------------------------------------------- commands
@@ -106,7 +147,9 @@ def cmd_backtest(args: argparse.Namespace, cfg: AppConfig) -> None:
     if model is not None:
         min_ev = cfg.learner.min_expected_r
         flt = lambda s: model.score_signal(s) >= min_ev  # noqa: E731
-    res = run_backtest(df, cfg.strategy, cfg.risk, cfg.costs, symbol, tf, cfg.broker.starting_equity, flt)
+    gcfg, cal = _guard(args, cfg)
+    res = run_backtest(df, cfg.strategy, cfg.risk, cfg.costs, symbol, tf, cfg.broker.starting_equity, flt,
+                       guard=gcfg, calendar=cal)
     if args.json:
         print(json.dumps(res.metrics, indent=2, default=str))
     else:
@@ -130,7 +173,8 @@ def cmd_train(args: argparse.Namespace, cfg: AppConfig) -> None:
     strat = strategy_from_overrides(cfg.strategy, {"min_score": 0})  # learn from every setup
     groups = []
     for df, symbol, tf in _datasets(args, cfg):
-        outcomes = collect_outcomes(df, strat, symbol, tf)
+        gcfg, cal = _guard(args, cfg)
+        outcomes = collect_outcomes(df, strat, symbol, tf, guard=gcfg, calendar=cal)
         filled = sum(1 for t in outcomes if t.status == "closed")
         print(f"{symbol} {tf}: {len(df)} bars, {len(outcomes)} setups, {filled} filled and resolved")
         groups.append(outcomes)
@@ -146,38 +190,34 @@ def cmd_optimize(args: argparse.Namespace, cfg: AppConfig) -> None:
     from .optimize import format_rows, optimize
 
     df, symbol, tf = load_data(args, cfg)
-    rows = optimize(df, cfg.strategy, split=args.split, symbol=symbol, timeframe=tf)
+    gcfg, cal = _guard(args, cfg)
+    rows = optimize(df, cfg.strategy, split=args.split, symbol=symbol, timeframe=tf, guard=gcfg, calendar=cal)
     print(f"{symbol} {tf}: {len(rows)} parameter sets, split at {df.index[int(len(df) * args.split)]:%Y-%m-%d}")
     print(format_rows(rows, args.top))
 
 
 def cmd_scan(args: argparse.Namespace, cfg: AppConfig) -> None:
-    from .core.engine import SMCEngine, bars_from_df
-
     for df, symbol, tf in _datasets(args, cfg):
-        eng = SMCEngine(cfg.strategy, symbol, tf)
-        last_sigs = []
-        for bar in bars_from_df(df):
-            sigs = eng.update(bar)
-            if sigs:
-                last_sigs = sigs
-        snap = eng.snapshot()
-        print(json.dumps(snap, indent=2, default=str))
-        recent = [s for s in last_sigs if eng.t - s.bar <= s.expiry_bars]
-        for s in recent:
-            print(f"ACTIVE SETUP {s.side.upper()} {s.model} {s.grade} entry {s.entry:.6g} sl {s.sl:.6g} "
-                  f"tp {s.tp:.6g} ({s.rr:.2f}R), {eng.t - s.bar} bars ago")
+        eng, grd, last = _run_guarded(df, cfg, symbol, tf, args)
+        out = eng.snapshot()
+        if grd is not None:
+            out["risk_context"] = grd.context(eng)
+        print(json.dumps(out, indent=2, default=str))
+        for s, dec in last:
+            if eng.t - s.bar > s.expiry_bars:
+                continue
+            status = "" if dec is None else ("GUARD OK" if dec.allowed else "BLOCKED: " + " | ".join(dec.blocks))
+            print(f"SETUP {s.side.upper()} {s.model} {s.grade} entry {s.entry:.6g} sl {s.sl:.6g} "
+                  f"tp {(dec.tp if dec and dec.tp else s.tp):.6g} ({s.rr:.2f}R), {eng.t - s.bar} bars ago  {status}")
 
 
 def cmd_brief(args: argparse.Namespace, cfg: AppConfig) -> None:
     from .ai.analyst import ClaudeAnalyst
-    from .core.engine import SMCEngine, bars_from_df
 
     df, symbol, tf = load_data(args, cfg)
-    eng = SMCEngine(cfg.strategy, symbol, tf)
-    for bar in bars_from_df(df):
-        eng.update(bar)
-    print(ClaudeAnalyst(cfg.ai).brief(eng))
+    eng, grd, _ = _run_guarded(df, cfg, symbol, tf, args)
+    context = {"risk_context": grd.context(eng)} if grd is not None else None
+    print(ClaudeAnalyst(cfg.ai).brief(eng, context))
 
 
 def cmd_run(args: argparse.Namespace, cfg: AppConfig) -> None:
@@ -213,7 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--timeframe", help="resample / override timeframe, e.g. 15m, 1h")
         sp.add_argument("--bars", type=int, default=0, help="number of most recent bars to use")
         sp.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
-                        help="override a strategy parameter, e.g. --set min_score=5")
+                        help="override a strategy parameter, e.g. --set min_score=5 (guard.* for the guard)")
+        sp.add_argument("--no-guard", action="store_true", help="disable the risk guard (to compare)")
 
     sp = sub.add_parser("backtest", help="replay history and simulate trades")
     data_args(sp)

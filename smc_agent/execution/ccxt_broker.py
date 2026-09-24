@@ -93,6 +93,61 @@ class CCXTBroker(Broker):
             log.warning("cancel %s failed: %s", o["id"], exc)
         o["status"] = "cancelled"
 
+    def spread(self, symbol: str) -> float | None:
+        try:
+            tk = self.ex.fetch_ticker(symbol)
+            if tk.get("ask") and tk.get("bid"):
+                return float(tk["ask"]) - float(tk["bid"])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fetch_ticker failed: %s", exc)
+        return None
+
+    def _position(self, symbol: str) -> dict[str, Any] | None:
+        if not self.ex.has.get("fetchPositions"):
+            return None
+        try:
+            for p in self.ex.fetch_positions([symbol]):
+                if abs(float(p.get("contracts") or 0.0)) > 0:
+                    return p
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fetch_positions failed: %s", exc)
+        return None
+
+    def position_info(self, symbol: str) -> dict[str, Any] | None:
+        p = self._position(symbol)
+        if p is not None:
+            sig = self.orders.get(symbol, {}).get("signal")
+            return {"status": "open", "direction": 1 if p.get("side") == "long" else -1,
+                    "fill_price": float(p.get("entryPrice") or (sig.entry if sig else 0.0)), "be_moved": False}
+        o = self.orders.get(symbol)
+        if o and o["status"] == "open":
+            return {"status": "pending", "direction": o["signal"].direction, "fill_price": 0.0, "be_moved": False}
+        return None
+
+    def cancel_pending(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        o = self.orders.get(symbol)
+        if not o or o["status"] != "open":
+            return []
+        self._cancel(symbol)
+        return [{"event": "cancelled", "symbol": symbol, "id": o["id"], "reason": reason}]
+
+    def close_position(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        p = self._position(symbol)
+        if p is None:
+            return []
+        side = "sell" if p.get("side") == "long" else "buy"
+        amount = abs(float(p.get("contracts") or 0.0))
+        self.ex.create_order(symbol, "market", side, amount, None, {"reduceOnly": True})
+        try:
+            self.ex.cancel_all_orders(symbol)  # attached stop / target
+        except Exception as exc:  # noqa: BLE001
+            log.warning("cancel_all_orders failed: %s", exc)
+        return [{"event": "guard_close", "symbol": symbol, "reason": reason}]
+
+    def protect(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        log.warning("ccxt: moving an attached stop is exchange specific; %s left unchanged (%s)", symbol, reason)
+        return []
+
     def on_bar(self, symbol: str, bar: Bar, t: int) -> list[dict[str, Any]]:
         o = self.orders.get(symbol)
         if not o or o["status"] != "open":

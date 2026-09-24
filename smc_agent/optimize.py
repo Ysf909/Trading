@@ -16,7 +16,8 @@ from typing import Any
 import pandas as pd
 
 from .backtest import run_backtest
-from .config import StrategyConfig, strategy_from_overrides
+from .config import GuardConfig, StrategyConfig, strategy_from_overrides
+from .news import NewsCalendar
 
 DEFAULT_GRID: dict[str, list[Any]] = {
     "internal_len": [3, 5, 7],
@@ -50,6 +51,8 @@ def optimize(
     symbol: str = "",
     timeframe: str = "",
     min_trades: int = 10,
+    guard: GuardConfig | None = None,
+    calendar: NewsCalendar | None = None,
 ) -> list[dict[str, Any]]:
     grid = grid or DEFAULT_GRID
     cut_time = df.index[int(len(df) * split)]
@@ -58,7 +61,7 @@ def optimize(
     for combo in itertools.product(*(grid[k] for k in keys)):
         params = dict(zip(keys, combo))
         cfg = strategy_from_overrides(base, params)
-        res = run_backtest(df, cfg, symbol=symbol, timeframe=timeframe)
+        res = run_backtest(df, cfg, symbol=symbol, timeframe=timeframe, guard=guard, calendar=calendar)
         ins = [t.r_multiple for t in res.trades if t.signal.time < cut_time]
         oos = [t.r_multiple for t in res.trades if t.signal.time >= cut_time]
         s_in, s_out = _stats(ins), _stats(oos)

@@ -34,7 +34,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from ..config import KILLZONES, StrategyConfig
-from .sessions import DailyLevels, SessionRange, in_window, ny_minutes
+from .sessions import PeriodLevels, SessionRange, in_window, ny_minutes
 from .structure import ATR, HTFBias, StructureTracker
 from .timeframes import auto_htf_minutes, timeframe_minutes
 from .types import (
@@ -99,15 +99,19 @@ class SMCEngine:
         self.swing = StructureTracker(c.swing_len, "swing")
         self.htf: HTFBias | None = None
         self.htf_minutes = c.htf_minutes
-        if not self.htf_minutes and timeframe:
+        self.chart_minutes: int | None = None
+        if timeframe:
             try:
-                self.htf_minutes = auto_htf_minutes(timeframe_minutes(timeframe))
+                self.chart_minutes = timeframe_minutes(timeframe)
             except ValueError:
-                self.htf_minutes = 0
+                self.chart_minutes = None
+        if not self.htf_minutes and self.chart_minutes:
+            self.htf_minutes = auto_htf_minutes(self.chart_minutes)
         if self.htf_minutes:
-            self.htf = HTFBias(self.htf_minutes, c.htf_len)
+            self.htf = HTFBias(self.htf_minutes, c.htf_len, c.day_tz, c.day_roll_hour)
         self.htf_trend = 0
-        self.daily = DailyLevels(c.day_tz)
+        self.daily = PeriodLevels(1440, c.day_tz, c.day_roll_hour)
+        self.weekly = PeriodLevels(10080, c.day_tz, c.day_roll_hour)
         self.sessions = {name: SessionRange(name) for name in ("asia", "london")}
         self.killzones_now: list[str] = []
 
@@ -151,10 +155,11 @@ class SMCEngine:
 
         # 1. volatility, HTF bias, killzones
         self.atr = self._atr.update(h, l, cl)
-        if self.htf is None and t == 1:  # auto HTF with unknown timeframe: infer from spacing
-            chart_min = max(1, round((bar.time - self.times[0]).total_seconds() / 60))
-            self.htf_minutes = auto_htf_minutes(chart_min)
-            self.htf = HTFBias(self.htf_minutes, c.htf_len)
+        if self.chart_minutes is None and t == 1:  # unknown timeframe: infer from bar spacing
+            self.chart_minutes = max(1, round((bar.time - self.times[0]).total_seconds() / 60))
+        if self.htf is None and t == 1:
+            self.htf_minutes = auto_htf_minutes(self.chart_minutes or 1)
+            self.htf = HTFBias(self.htf_minutes, c.htf_len, c.day_tz, c.day_roll_hour)
             self.htf.update(Bar(self.times[0], self.opens[0], self.highs[0], self.lows[0], self.closes[0]))
         if self.htf is not None:
             self.htf_trend = self.htf.update(bar)
@@ -171,6 +176,10 @@ class SMCEngine:
         if done is not None:
             self._replace_level("pdh", done[0], LONG, done[2])
             self._replace_level("pdl", done[1], SHORT, done[2])
+        done = self.weekly.update(bar.time, t, h, l)
+        if done is not None:
+            self._replace_level("pwh", done[0], LONG, done[2])
+            self._replace_level("pwl", done[1], SHORT, done[2])
 
         # 3. structure
         int_events = self.internal.update(t, self.highs, self.lows, cl, self.times)
@@ -642,5 +651,6 @@ def bars_from_df(df: pd.DataFrame) -> Iterable[Bar]:
     times = df.index.to_pydatetime()
     o, h, l, c = (df[k].astype(float).tolist() for k in ("open", "high", "low", "close"))
     v = df["volume"].astype(float).tolist() if "volume" in df else [0.0] * len(df)
+    sp = df["spread"].astype(float).tolist() if "spread" in df else [0.0] * len(df)
     for i in range(len(df)):
-        yield Bar(times[i], o[i], h[i], l[i], c[i], v[i])
+        yield Bar(times[i], o[i], h[i], l[i], c[i], v[i], sp[i])

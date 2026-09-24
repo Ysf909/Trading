@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from ..config import KILLZONES
+from .timeframes import Bucketer
 
 NY = ZoneInfo("America/New_York")
 
@@ -66,24 +67,37 @@ class SessionRange:
         return finished
 
 
-class DailyLevels:
-    """Tracks the running day's range; returns the prior day on rollover."""
+class PeriodLevels:
+    """Tracks the running day's / week's range; returns the prior one on rollover.
 
-    def __init__(self, tz: str = "UTC") -> None:
-        self.tz = ZoneInfo(tz)
-        self.day: date | None = None
+    Periods follow the broker session (see ``Bucketer``): for XAUUSD use
+    ``tz="America/New_York", roll_hour=17``."""
+
+    def __init__(self, minutes: int = 1440, tz: str = "UTC", roll_hour: int = 0) -> None:
+        self.bucketer = Bucketer(minutes, tz, roll_hour)
+        self.key: int | None = None
         self.high = float("-inf")
         self.low = float("inf")
         self.start_bar = -1
+        self.history: list[tuple[float, float]] = []  # completed (high, low)
 
     def update(self, t_time: datetime, t: int, high: float, low: float) -> tuple[float, float, int] | None:
-        d = t_time.astimezone(self.tz).date()
+        k = self.bucketer.key(t_time)
         finished = None
-        if self.day is None or d != self.day:
-            if self.day is not None:
+        if self.key is None or k != self.key:
+            if self.key is not None:
                 finished = (self.high, self.low, self.start_bar)
-            self.day, self.high, self.low, self.start_bar = d, high, low, t
+                self.history.append((self.high, self.low))
+                if len(self.history) > 60:
+                    del self.history[0]
+            self.key, self.high, self.low, self.start_bar = k, high, low, t
         else:
             self.high = max(self.high, high)
             self.low = min(self.low, low)
         return finished
+
+    def average_range(self, n: int) -> float | None:
+        if len(self.history) < n:
+            return None
+        rows = self.history[-n:]
+        return sum(h - l for h, l in rows) / n

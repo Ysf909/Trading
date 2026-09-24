@@ -22,6 +22,7 @@ class Bar:
     low: float
     close: float
     volume: float = 0.0
+    spread: float = 0.0  # in price units when the feed provides it (MT5), else 0
 
 
 @dataclass(slots=True)

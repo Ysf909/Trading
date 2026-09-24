@@ -43,7 +43,8 @@ class StrategyConfig:
     # --- liquidity ---------------------------------------------------------
     eq_tolerance_atr: float = 0.1  # equal highs/lows tolerance (x ATR)
     max_levels: int = 40  # per side
-    day_tz: str = "UTC"  # timezone used to roll previous-day high/low
+    day_tz: str = "UTC"  # timezone of the trading day (XAUUSD / forex: America/New_York)
+    day_roll_hour: int = 0  # local hour the trading day starts (XAUUSD / forex brokers: 17)
 
     # --- entry models --------------------------------------------------------
     models: str = "both"  # reversal | continuation | both
@@ -84,6 +85,83 @@ class StrategyConfig:
                 raise ValueError(f"unknown killzone {kz!r}; choose from {list(KILLZONES)}")
         if self.internal_len < 1 or self.swing_len < 1 or self.htf_len < 1:
             raise ValueError("pivot lengths must be >= 1")
+
+
+@dataclass
+class GuardConfig:
+    """Caution layer applied to every setup before it becomes an order, and to
+    open trades on every candle (see smc_agent/guard.py and docs/guard.md)."""
+
+    enabled: bool = True
+
+    # --- multi-timeframe (top-down) -------------------------------------------
+    mtf_timeframes: list[int] = field(default_factory=lambda: [60, 240, 1440, 10080])
+    mtf_len: int = 3  # pivot strength on the higher timeframes
+    mtf_block_opposing: list[int] = field(default_factory=lambda: [1440])  # bias TFs: never trade against these
+    mtf_soft_opposing: list[int] = field(default_factory=lambda: [240])  # structure TFs: against them only from
+    # their discount (longs) / premium (shorts) half, i.e. buying an H4 pullback inside a D1 uptrend
+    mtf_min_aligned: int = 1  # at least this many higher TFs must agree with the trade
+    mtf_pd_extreme: float = 0.9  # no longs above 90% (shorts below 10%) of a bias / structure TF range
+    obstacle_check: bool = True  # cap / refuse targets behind HTF levels (PDH/PWH, HTF swings, HTF FVGs)
+    obstacle_buffer_atr: float = 0.05  # take profit this much before the obstacle
+
+    # --- volatility / abnormal price action -----------------------------------
+    shock_atr_mult: float = 4.0  # a candle range (or gap) above 4x the slow ATR(100) = shock (news spike)
+    shock_cooldown_min: int = 90  # no new entries (pending orders cancelled) for 90 minutes after a shock
+    regime_atr_len: int = 100
+    regime_max_ratio: float = 2.5  # ATR / ATR(100) above this = extreme volatility, stand aside
+    caution_ratio: float = 1.8  # above this = half size
+    adr_len: int = 10
+    adr_max_mult: float = 1.3  # today's range above 1.3x ADR = extended, no new entries
+
+    # --- sessions (New York time) ---------------------------------------------
+    market_hours: str = "forex"  # forex (XAUUSD, FX, indices CFDs) | 24x7 (crypto)
+    rollover_start: str = "16:45"  # daily rollover: spreads widen, liquidity thin
+    rollover_end: str = "18:30"
+    friday_cutoff: str = "14:00"  # no new entries (and pending orders cancelled) after this on Friday
+    weekend_close: str = "16:00"  # Friday: close open positions at/after this
+    weekend_action: str = "close"  # close | hold
+    sunday_open_until: str = "19:00"  # no entries in the first hour after the Sunday open
+    holidays: list[str] = field(default_factory=lambda: ["12-24", "12-25", "12-31", "01-01"])  # MM-DD, NY
+
+    # --- news -----------------------------------------------------------------
+    news: bool = True
+    news_currencies: list[str] = field(default_factory=lambda: ["USD"])
+    news_min_impact: str = "high"  # high | medium
+    news_before_min: int = 30
+    news_after_min: int = 30
+    news_open_action: str = "close"  # close | protect (stop to entry when in profit) | hold
+    news_url: str = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    news_file: str = ""  # optional CSV of events (time,currency,impact,title) e.g. for backtests
+    news_cache: str = "state/news_cache.json"
+    std_windows: list[str] = field(default_factory=lambda: ["08:30", "10:00", "14:00"])  # typical US release times
+    std_before_min: int = 10
+    std_after_min: int = 20
+    std_cancel_pending: bool = False  # standard windows only block new entries; known events also cancel orders
+    block_bank_holidays: bool = True  # calendar "Holiday" events for news_currencies
+
+    # --- losing streaks / drawdown (in R, identical in Pine) ------------------
+    max_consec_losses: int = 3
+    loss_pause_bars: int = 16
+    max_daily_loss_r: float = 3.0
+    max_weekly_loss_r: float = 6.0
+    max_drawdown_r: float = 12.0  # halt until restarted / reset
+
+    # --- execution sanity -----------------------------------------------------
+    max_spread: float = 0.0  # price units, 0 = off (XAUUSD: ~0.5)
+    max_spread_atr: float = 0.3  # spread above 30% of ATR = skip (when spread is known)
+    stale_bars: int = 3  # live: newest candle older than this many bars = feed problem, no entries
+    structure_exit: bool = False  # close an open trade on an internal CHoCH against it
+
+    def validate(self) -> None:
+        if self.market_hours not in ("forex", "24x7"):
+            raise ValueError("guard.market_hours must be forex or 24x7")
+        if self.weekend_action not in ("close", "hold"):
+            raise ValueError("guard.weekend_action must be close or hold")
+        if self.news_open_action not in ("close", "protect", "hold"):
+            raise ValueError("guard.news_open_action must be close, protect or hold")
+        if self.news_min_impact not in ("high", "medium"):
+            raise ValueError("guard.news_min_impact must be high or medium")
 
 
 @dataclass
@@ -141,6 +219,7 @@ class BrokerConfig:
     state_path: str = "state/paper_broker.json"
     mt5_magic: int = 909_909
     mt5_deviation: int = 20
+    max_leverage: float = 20.0  # cap position notional at equity x this (MT5 sizing)
     quote_currency: str = "USDT"  # balance currency for ccxt equity
     market_type: str = "future"  # ccxt defaultType: spot | future | swap
 
@@ -164,6 +243,7 @@ class WebhookConfig:
 class AppConfig:
     markets: list[MarketConfig] = field(default_factory=lambda: [MarketConfig()])
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    guard: GuardConfig = field(default_factory=GuardConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     costs: CostConfig = field(default_factory=CostConfig)
     learner: LearnerConfig = field(default_factory=LearnerConfig)
@@ -206,6 +286,7 @@ def load_config(path: str | os.PathLike | None) -> AppConfig:
         raw = yaml.safe_load(Path(path).read_text()) or {}
         cfg = _build(AppConfig, raw)
     cfg.strategy.validate()
+    cfg.guard.validate()
     return cfg
 
 

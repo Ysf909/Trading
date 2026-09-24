@@ -12,10 +12,12 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from .config import CostConfig, RiskConfig, StrategyConfig
+from .config import CostConfig, GuardConfig, RiskConfig, StrategyConfig
 from .core.engine import SMCEngine, bars_from_df
 from .core.types import Signal
-from .execution.sim import Trade, settle, step
+from .execution.sim import Trade, force_close, settle, step
+from .guard import Guard, apply_decision
+from .news import NewsCalendar
 
 SignalFilter = Callable[[Signal], bool]
 
@@ -29,6 +31,8 @@ class BacktestResult:
     starting_equity: float
     engine: SMCEngine
     metrics: dict[str, Any] = field(default_factory=dict)
+    blocked: list[tuple[Signal, list[str]]] = field(default_factory=list)
+    guard: Guard | None = None
 
     def trades_frame(self) -> pd.DataFrame:
         return pd.DataFrame([t.to_dict() for t in self.trades + self.cancelled])
@@ -48,36 +52,77 @@ def run_backtest(
     timeframe: str = "",
     starting_equity: float = 10_000.0,
     signal_filter: SignalFilter | None = None,
+    guard: GuardConfig | None = None,
+    calendar: NewsCalendar | None = None,
 ) -> BacktestResult:
     """One position (or pending order) at a time; a fresher signal replaces a
-    still-pending order, signals are ignored while a position is open."""
+    still-pending order, signals are ignored while a position is open.
+
+    With ``guard`` every setup must pass the risk guard (the target may be
+    capped) and open trades / pending orders are cancelled, closed or
+    protected by it bar by bar - exactly as in live trading."""
     risk = risk or RiskConfig()
     costs = costs or CostConfig()
     engine = SMCEngine(strategy, symbol, timeframe)
+    grd = Guard(guard, strategy, calendar) if guard is not None and guard.enabled else None
     equity = starting_equity
     active: Trade | None = None
     trades: list[Trade] = []
     cancelled: list[Trade] = []
     taken: list[Signal] = []
+    blocked: list[tuple[Signal, list[str]]] = []
     curve: list[tuple[Any, float]] = []
     last_bar = None
 
+    def close_out(tr: Trade) -> None:
+        nonlocal equity
+        settle(tr, costs.commission_pct, costs.slippage_pct)
+        equity += tr.pnl
+        trades.append(tr)
+        if grd is not None:
+            grd.on_trade_closed(tr.r_multiple)
+
     for t, bar in enumerate(bars_from_df(df)):
         last_bar = bar
+        if grd is not None:
+            grd.begin_bar(bar)
         if active is not None:
             ev = step(active, bar, t, strategy.breakeven_at_r)
             if active.status == "closed":
-                settle(active, costs.commission_pct, costs.slippage_pct)
-                equity += active.pnl
-                trades.append(active)
+                close_out(active)
                 active = None
             elif ev == "cancelled":
                 cancelled.append(active)
                 active = None
 
-        for sig in sorted(engine.update(bar), key=lambda s: -s.score):
+        signals = engine.update(bar)
+        size_mult = 1.0
+        if grd is not None:
+            grd.on_bar(bar, engine)
+            if active is not None:
+                act = grd.trade_action(active.status, active.direction, active.fill_price, active.be_moved,
+                                       bar.close, engine)
+                if act is not None and act.kind == "cancel":
+                    active.status, active.exit_reason, active.exit_bar = "cancelled", act.reason, t
+                    cancelled.append(active)
+                    active = None
+                elif act is not None and act.kind == "close":
+                    force_close(active, bar.close, t, bar.time, act.reason)
+                    close_out(active)
+                    active = None
+                elif act is not None and act.kind == "protect":
+                    active.sl, active.be_moved = active.fill_price, True
+
+        for sig in sorted(signals, key=lambda s: -s.score):
             if signal_filter is not None and not signal_filter(sig):
                 continue
+            if grd is not None:
+                dec = grd.check(sig, engine, bar.spread or None)
+                if not dec.allowed:
+                    blocked.append((sig, dec.blocks))
+                    continue
+                sig = apply_decision(sig, dec)
+                size_mult = dec.size_mult
             if sig.rr < risk.min_rr:
                 continue
             if active is not None and active.status == "open":
@@ -85,47 +130,67 @@ def run_backtest(
             if active is not None:  # replace stale pending order
                 active.status, active.exit_reason, active.exit_bar = "cancelled", "replaced", t
                 cancelled.append(active)
-            active = Trade(sig, qty=position_size(equity, risk.risk_per_trade_pct, sig))
+            active = Trade(sig, qty=position_size(equity, risk.risk_per_trade_pct, sig) * size_mult)
             taken.append(sig)
             break
         curve.append((bar.time, equity))
 
     if active is not None and active.status == "open" and last_bar is not None:
-        active.status = "closed"
-        active.exit_price, active.exit_bar = last_bar.close, engine.t
-        active.exit_time, active.exit_reason = last_bar.time, "eod"
-        settle(active, costs.commission_pct, costs.slippage_pct)
-        equity += active.pnl
-        trades.append(active)
+        force_close(active, last_bar.close, engine.t, last_bar.time, "eod")
+        close_out(active)
         if curve:
             curve[-1] = (curve[-1][0], equity)
 
-    res = BacktestResult(trades, cancelled, taken, curve, starting_equity, engine)
+    res = BacktestResult(trades, cancelled, taken, curve, starting_equity, engine, blocked=blocked, guard=grd)
     res.metrics = compute_metrics(res)
     return res
 
 
-def collect_outcomes(df: pd.DataFrame, strategy: StrategyConfig, symbol: str = "", timeframe: str = "") -> list[Trade]:
+def collect_outcomes(df: pd.DataFrame, strategy: StrategyConfig, symbol: str = "", timeframe: str = "",
+                     guard: GuardConfig | None = None, calendar: NewsCalendar | None = None) -> list[Trade]:
     """Simulate *every* signal independently (no position overlap rules).
 
     Used to label signals for the learner: each returned trade is closed or
-    cancelled with its own outcome."""
+    cancelled with its own outcome. With ``guard`` only setups the guard allows
+    are simulated (with capped targets and guard exits), like live trading."""
     engine = SMCEngine(strategy, symbol, timeframe)
+    grd = Guard(guard, strategy, calendar) if guard is not None and guard.enabled else None
     live: list[Trade] = []
     done: list[Trade] = []
     last_bar = None
     for t, bar in enumerate(bars_from_df(df)):
         last_bar = bar
+        if grd is not None:
+            grd.begin_bar(bar)
         still: list[Trade] = []
         for tr in live:
             step(tr, bar, t, strategy.breakeven_at_r)
             (done if tr.status in ("closed", "cancelled") else still).append(tr)
         live = still
-        live.extend(Trade(sig, qty=1.0) for sig in engine.update(bar))
+        signals = engine.update(bar)
+        if grd is not None:
+            grd.on_bar(bar, engine)
+            still = []
+            for tr in live:
+                act = grd.trade_action(tr.status, tr.direction, tr.fill_price, tr.be_moved, bar.close, engine)
+                if act is not None and act.kind == "cancel":
+                    tr.status, tr.exit_reason, tr.exit_bar = "cancelled", act.reason, t
+                elif act is not None and act.kind == "close":
+                    force_close(tr, bar.close, t, bar.time, act.reason)
+                elif act is not None and act.kind == "protect":
+                    tr.sl, tr.be_moved = tr.fill_price, True
+                (done if tr.status in ("closed", "cancelled") else still).append(tr)
+            live = still
+            kept = []
+            for sig in signals:
+                dec = grd.check(sig, engine, bar.spread or None)
+                if dec.allowed:
+                    kept.append(apply_decision(sig, dec))
+            signals = kept
+        live.extend(Trade(sig, qty=1.0) for sig in signals)
     for tr in live:  # unresolved at the end of the data
         if tr.status == "open" and last_bar is not None:
-            tr.status, tr.exit_price, tr.exit_reason = "closed", last_bar.close, "eod"
-            tr.exit_bar, tr.exit_time = engine.t, last_bar.time
+            force_close(tr, last_bar.close, engine.t, last_bar.time, "eod")
             done.append(tr)
     done.sort(key=lambda tr: tr.signal.bar)
     return done
@@ -193,6 +258,19 @@ def compute_metrics(res: BacktestResult) -> dict[str, Any]:
             groups.setdefault(str(getattr(t.signal, attr)), []).append(t.r_multiple)
         m[key] = {k: _stats(v) for k, v in sorted(groups.items())}
     m["engine_rejections"] = dict(res.engine.rejections)
+    exits: dict[str, int] = {}
+    for t in closed:
+        key = t.exit_reason.split(":", 1)[0]
+        exits[key] = exits.get(key, 0) + 1
+    m["exits"] = exits
+    if res.guard is not None:
+        m["guard"] = {
+            "setups_blocked": len(res.blocked),
+            "blocks_by_rule": dict(res.guard.block_counts.most_common()),
+            "targets_capped": sum(1 for s in res.signals if s.meta.get("tp_capped")),
+            "pending_cancelled": sum(1 for t in res.cancelled if ":" in t.exit_reason),
+            "halted": res.guard.halted or None,
+        }
     return m
 
 
@@ -213,6 +291,12 @@ def format_report(metrics: dict[str, Any], title: str = "Backtest") -> str:
         f"{o['missed']} missed, {o['replaced']} replaced (fill rate {o['fill_rate']:.0%}, "
         f"avg hold {o['avg_bars_held']} bars)",
     ]
+    lines.append("Exits: " + ", ".join(f"{k} {v}" for k, v in sorted(metrics.get("exits", {}).items())))
+    g = metrics.get("guard")
+    if g:
+        rules = ", ".join(f"{k} {v}" for k, v in g["blocks_by_rule"].items()) or "none"
+        lines.append(f"Guard: {g['setups_blocked']} setups blocked ({rules}); {g['targets_capped']} targets capped; "
+                     f"{g['pending_cancelled']} pending orders cancelled" + (f"; HALTED: {g['halted']}" if g["halted"] else ""))
     for key in ("by_model", "by_grade", "by_side"):
         parts = [
             f"{k}: {v['trades']} tr, {v['win_rate']:.0%} win, {v['avg_r']:+.2f}R avg"

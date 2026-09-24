@@ -10,7 +10,7 @@ from typing import Any
 
 from ..core.types import Bar, Signal, signal_from_dict
 from ..risk import AccountState
-from .sim import Trade, settle, step
+from .sim import Trade, force_close, settle, step
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,29 @@ class Broker(ABC):
     @abstractmethod
     def on_bar(self, symbol: str, bar: Bar, t: int) -> list[dict[str, Any]]:
         """Called for every new closed bar of ``symbol`` (engine bar index ``t``)."""
+
+    # --- position management used by the risk guard ------------------------
+    def position_info(self, symbol: str) -> dict[str, Any] | None:
+        """``{"status": "pending"|"open", "direction", "fill_price", "be_moved"}`` or None."""
+        return None
+
+    def cancel_pending(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        return []
+
+    def close_position(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        return []
+
+    def protect(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        """Move the stop of an open position to its entry price."""
+        return []
+
+    def spread(self, symbol: str) -> float | None:
+        """Current spread in price units, when the venue exposes it."""
+        return None
+
+    def symbols(self) -> set[str]:
+        st = self.account_state()
+        return st.open_symbols | st.pending_symbols
 
     def close(self) -> None:  # pragma: no cover - optional hook
         pass
@@ -89,6 +112,46 @@ class PaperBroker(Broker):
         self.active[sig.symbol] = Trade(sig, qty=qty)
         self._save()
         return sig.id
+
+    def position_info(self, symbol: str) -> dict[str, Any] | None:
+        tr = self.active.get(symbol)
+        if tr is None:
+            return None
+        return {"status": tr.status, "direction": tr.direction, "fill_price": tr.fill_price,
+                "be_moved": tr.be_moved}
+
+    def cancel_pending(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        tr = self.active.get(symbol)
+        if tr is None or tr.status != "pending":
+            return []
+        tr.status, tr.exit_reason = "cancelled", reason
+        del self.active[symbol]
+        self._save()
+        return [{"event": "cancelled", **tr.to_dict()}]
+
+    def close_position(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        from datetime import datetime, timezone
+
+        tr = self.active.get(symbol)
+        if tr is None or tr.status != "open":
+            return []
+        price = self.last_price.get(symbol, tr.fill_price)
+        force_close(tr, price, tr.fill_bar, datetime.now(timezone.utc), reason)
+        settle(tr, self.commission_pct, self.slippage_pct)
+        self.cash += tr.pnl
+        rec = tr.to_dict()
+        self.closed.append(rec)
+        del self.active[symbol]
+        self._save()
+        return [{"event": "closed", **rec}]
+
+    def protect(self, symbol: str, reason: str) -> list[dict[str, Any]]:
+        tr = self.active.get(symbol)
+        if tr is None or tr.status != "open" or tr.be_moved:
+            return []
+        tr.sl, tr.be_moved = tr.fill_price, True
+        self._save()
+        return [{"event": "protected", "symbol": symbol, "sl": tr.sl, "reason": reason}]
 
     def on_bar(self, symbol: str, bar: Bar, t: int) -> list[dict[str, Any]]:
         self.last_price[symbol] = bar.close
