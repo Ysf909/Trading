@@ -43,6 +43,8 @@ class FakeMT5:
         self.expiration_flags = 1 | 2 | 4 | 8
         self.rates = None  # numpy structured array returned by copy_rates_from_pos
         self.init_kwargs = None
+        self.margin_free = 10_000.0
+        self.leverage = {"XAUUSD": 100.0}  # per-symbol margin leverage (order_calc_margin)
 
     # ------------------------------------------------------------ terminal
     def initialize(self, *args, **kwargs):
@@ -60,7 +62,7 @@ class FakeMT5:
                   name="MetaTrader 5", company="Demo Broker Ltd", build=4755, path="C:\\MT5")
 
     def account_info(self):
-        return NS(equity=10_000.0, balance=10_000.0, margin_mode=self.margin_mode, login=5012345,
+        return NS(equity=10_000.0, balance=10_000.0, margin_free=self.margin_free, margin_mode=self.margin_mode, login=5012345,
                   server="DemoBroker-Server", company="Demo Broker Ltd", currency="USD", leverage=100,
                   trade_mode=self.trade_mode, trade_allowed=True, trade_expert=True, name="Test")
 
@@ -78,6 +80,11 @@ class FakeMT5:
                   trade_tick_size=0.01, trade_tick_value=1.0, trade_contract_size=100.0,
                   volume_step=0.01, volume_min=0.01, volume_max=100.0, trade_stops_level=0,
                   filling_mode=self.filling_flags, expiration_mode=self.expiration_flags, spread=20)
+
+    def order_calc_margin(self, action, symbol, volume, price):
+        if symbol not in self.symbols:
+            return None
+        return volume * price * 100.0 / self.leverage.get(symbol, 100.0)
 
     def server_now(self):
         return int(time.time() + self.server_offset_h * 3600)

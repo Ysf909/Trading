@@ -20,7 +20,7 @@ from typing import Any
 
 import pandas as pd
 
-from .config import AppConfig, MarketConfig
+from .config import AppConfig, MarketConfig, guard_for
 from .core.engine import SMCEngine, bars_from_df
 from .core.timeframes import timeframe_minutes
 from .core.types import LONG, SHORT, Signal
@@ -118,7 +118,8 @@ class TradingAgent:
         for m in cfg.markets:
             feed = (feeds or {}).get(m.symbol) or make_feed(m, cfg.broker)
             eng = SMCEngine(cfg.strategy, m.symbol, m.timeframe)
-            guard = Guard(g, cfg.strategy, self.calendar) if g.enabled else None
+            mg = guard_for(cfg, m)
+            guard = Guard(mg, cfg.strategy, self.calendar) if mg.enabled else None
             self.markets.append(MarketRuntime(m, feed, eng, guard, timeframe_minutes(m.timeframe)))
 
     # --------------------------------------------------------------- calendar

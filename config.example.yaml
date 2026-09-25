@@ -2,12 +2,21 @@
 # Every key is optional - anything left out uses the defaults in smc_agent/config.py.
 # Crypto users: see config.crypto.example.yaml.
 
-markets:
-  - symbol: XAUUSD            # MT5 symbol name at your broker (XAUUSD, XAUUSD.m, GOLD ...)
+markets:                      # one entry per market - never several names in one symbol: line
+  - symbol: XAUUSD            # EXACT Market Watch name at your broker (XAUUSD, XAUUSD_, XAUUSD.m, GOLD ...)
     timeframe: 15m            # entry timeframe; M5 / M15 / H1 all work
     feed: mt5                 # mt5 (Windows + MT5 terminal) | csv (TradingView export) | yfinance
     tv_symbol: XAUUSD         # TradingView ticker for webhook alerts (OANDA:XAUUSD -> XAUUSD)
     # csv_path: data/OANDA_XAUUSD_15.csv   # for feed: csv
+
+  # A second market: remove the # in front of these lines and put your broker's exact name.
+  # - symbol: BTCUSD
+  #   timeframe: 15m
+  #   feed: mt5
+  #   tv_symbol: BTCUSD
+  #   guard:                  # this market's own guard settings; everything else comes from guard: below
+  #     market_hours: 24x7    # crypto trades every day (no Friday cut-off / weekend close)
+  #     max_spread: 0         # gold's 0.60 limit would block every bitcoin trade; 0 = judge by ATR only
 
 strategy:
   swing_len: 20
@@ -105,6 +114,7 @@ broker:
   mt5_magic: 909909           # tags the agent's orders in MT5 (it never touches other trades)
   mt5_deviation: 30           # points of slippage allowed on market orders
   max_leverage: 20
+  max_margin_pct: 50          # one order may use at most 50% of the free margin (crypto has low leverage)
   mt5_server_time: auto       # clock of your broker's candles: auto | ny+7 | utc | +2 ... (smc-agent check shows it)
   # Optional - by default the agent uses the account the MT5 terminal is logged into:
   # mt5_login: 12345678       # account number; the password goes in windows\secrets.bat (MT5_PASSWORD)

@@ -23,7 +23,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from .config import AppConfig, MarketConfig, load_config, strategy_from_overrides
+from .config import AppConfig, MarketConfig, guard_for, load_config, strategy_from_overrides
 
 log = logging.getLogger("smc_agent")
 
@@ -82,16 +82,18 @@ def _datasets(args: argparse.Namespace, cfg: AppConfig) -> list[tuple[pd.DataFra
     return out
 
 
-def _guard(args: argparse.Namespace, cfg: AppConfig):
-    """(guard config or None, calendar for backtests) - history needs a CSV, the live feed is weekly."""
+def _guard(args: argparse.Namespace, cfg: AppConfig, symbol: str | None = None):
+    """(guard config or None, calendar for backtests) - history needs a CSV, the live feed is weekly.
+    A configured market's own guard overrides apply when ``symbol`` is one of the markets."""
     from .news import NewsCalendar
 
-    if getattr(args, "no_guard", False) or not cfg.guard.enabled:
+    g = guard_for(cfg, symbol) if symbol else cfg.guard
+    if getattr(args, "no_guard", False) or not g.enabled:
         return None, None
     cal = None
-    if cfg.guard.news and cfg.guard.news_file and Path(cfg.guard.news_file).exists():
-        cal = NewsCalendar.from_csv(cfg.guard.news_file)
-    return cfg.guard, cal
+    if g.news and g.news_file and Path(g.news_file).exists():
+        cal = NewsCalendar.from_csv(g.news_file)
+    return g, cal
 
 
 def _run_guarded(df: pd.DataFrame, cfg: AppConfig, symbol: str, tf: str, args: argparse.Namespace):
@@ -99,7 +101,7 @@ def _run_guarded(df: pd.DataFrame, cfg: AppConfig, symbol: str, tf: str, args: a
     from .core.engine import SMCEngine, bars_from_df
     from .guard import Guard
 
-    gcfg, cal = _guard(args, cfg)
+    gcfg, cal = _guard(args, cfg, symbol)
     eng = SMCEngine(cfg.strategy, symbol, tf)
     grd = Guard(gcfg, cfg.strategy, cal) if gcfg is not None else None
     last: list = []
@@ -148,7 +150,7 @@ def cmd_backtest(args: argparse.Namespace, cfg: AppConfig) -> None:
     if model is not None:
         min_ev = cfg.learner.min_expected_r
         flt = lambda s: model.score_signal(s) >= min_ev  # noqa: E731
-    gcfg, cal = _guard(args, cfg)
+    gcfg, cal = _guard(args, cfg, symbol)
     res = run_backtest(df, cfg.strategy, cfg.risk, cfg.costs, symbol, tf, cfg.broker.starting_equity, flt,
                        guard=gcfg, calendar=cal)
     if args.json:
@@ -174,7 +176,7 @@ def cmd_train(args: argparse.Namespace, cfg: AppConfig) -> None:
     strat = strategy_from_overrides(cfg.strategy, {"min_score": 0})  # learn from every setup
     groups = []
     for df, symbol, tf in _datasets(args, cfg):
-        gcfg, cal = _guard(args, cfg)
+        gcfg, cal = _guard(args, cfg, symbol)
         outcomes = collect_outcomes(df, strat, symbol, tf, guard=gcfg, calendar=cal)
         filled = sum(1 for t in outcomes if t.status == "closed")
         print(f"{symbol} {tf}: {len(df)} bars, {len(outcomes)} setups, {filled} filled and resolved")
@@ -191,7 +193,7 @@ def cmd_optimize(args: argparse.Namespace, cfg: AppConfig) -> None:
     from .optimize import format_rows, optimize
 
     df, symbol, tf = load_data(args, cfg)
-    gcfg, cal = _guard(args, cfg)
+    gcfg, cal = _guard(args, cfg, symbol)
     rows = optimize(df, cfg.strategy, split=args.split, symbol=symbol, timeframe=tf, guard=gcfg, calendar=cal)
     print(f"{symbol} {tf}: {len(rows)} parameter sets, split at {df.index[int(len(df) * args.split)]:%Y-%m-%d}")
     print(format_rows(rows, args.top))
@@ -313,7 +315,11 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except (ValueError, TypeError, yaml.YAMLError) as exc:
+        print(f"\nProblem in {args.config or 'the configuration'}:\n\n{exc}\n", file=sys.stderr)
+        raise SystemExit(2) from None
     _apply_overrides(cfg, getattr(args, "set", []))
     args.func(args, cfg)
 

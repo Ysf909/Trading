@@ -8,7 +8,7 @@ agent, the backtester, the optimizer and (by name) the TradingView inputs in
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +156,8 @@ class GuardConfig:
     structure_exit: bool = False  # close an open trade on an internal CHoCH against it
 
     def validate(self) -> None:
+        if self.market_hours in ("24/7", "24x7", "crypto"):
+            self.market_hours = "24x7"
         if self.market_hours not in ("forex", "24x7"):
             raise ValueError("guard.market_hours must be forex or 24x7")
         if self.weekend_action not in ("close", "hold"):
@@ -208,6 +210,7 @@ class MarketConfig:
     exchange: str = "binance"  # for ccxt
     csv_path: str = ""  # for csv
     tv_symbol: str = ""  # TradingView ticker used by webhook alerts (e.g. BTCUSDT)
+    guard: dict[str, Any] = field(default_factory=dict)  # this market's own guard settings (override guard:)
 
 
 @dataclass
@@ -226,6 +229,7 @@ class BrokerConfig:
     mt5_server: str = ""
     mt5_password_env: str = "MT5_PASSWORD"
     mt5_server_time: str = "auto"  # auto | ny+7 | utc | +2 ... (clock of the broker's candles)
+    max_margin_pct: float = 50.0  # one order may use at most this % of the free margin (MT5 sizing)
     max_leverage: float = 20.0  # cap position notional at equity x this (MT5 sizing)
     quote_currency: str = "USDT"  # balance currency for ccxt equity
     market_type: str = "future"  # ccxt defaultType: spot | future | swap
@@ -286,6 +290,35 @@ def _build(cls: type, data: dict[str, Any] | None) -> Any:
     return cls(**kwargs)
 
 
+def _check_markets(markets: list[MarketConfig]) -> None:
+    seen: set[str] = set()
+    for i, m in enumerate(markets):
+        names = [n.strip() for n in str(m.symbol).replace(";", ",").split(",") if n.strip()]
+        if len(names) > 1 or " " in str(m.symbol).strip():
+            example = "\n".join(f"  - symbol: {n}\n    timeframe: {m.timeframe}\n    feed: {m.feed}" for n in names)
+            raise ValueError(f"markets[{i}].symbol {m.symbol!r} lists several symbols in one line. "
+                             f"Give each market its own entry, like this:\n\nmarkets:\n{example}\n")
+        if m.symbol in seen:
+            raise ValueError(f"market {m.symbol!r} is listed twice in markets")
+        seen.add(m.symbol)
+
+
+def guard_for(cfg: AppConfig, market: MarketConfig | str | None) -> GuardConfig:
+    """Guard settings for one market: ``guard:`` plus that market's own ``guard:`` overrides
+    (e.g. BTCUSD next to XAUUSD: market_hours 24x7 and its own spread limit)."""
+    m = market
+    if not isinstance(m, MarketConfig):
+        m = next((x for x in cfg.markets if market in (x.symbol, x.tv_symbol)), None)
+    if m is None or not m.guard:
+        return cfg.guard
+    unknown = set(m.guard) - {f.name for f in fields(GuardConfig)}
+    if unknown:
+        raise ValueError(f"unknown keys in the guard: of market {m.symbol}: {sorted(unknown)}")
+    g = replace(cfg.guard, **m.guard)
+    g.validate()
+    return g
+
+
 def load_config(path: str | os.PathLike | None) -> AppConfig:
     if path is None:
         cfg = AppConfig()
@@ -294,6 +327,9 @@ def load_config(path: str | os.PathLike | None) -> AppConfig:
         cfg = _build(AppConfig, raw)
     cfg.strategy.validate()
     cfg.guard.validate()
+    _check_markets(cfg.markets)
+    for m in cfg.markets:
+        guard_for(cfg, m)
     return cfg
 
 

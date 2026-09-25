@@ -115,6 +115,25 @@ broker:
 Everything else is already set for gold: the risk guard, news, sessions, and the TP1 partial at
 1.5R. Each line is explained in the file itself.
 
+**Several markets** (e.g. gold and bitcoin): give each one its own entry. Never put several
+names in one `symbol:` line.
+
+```yaml
+markets:
+  - symbol: XAUUSD_         # exact names from Market Watch
+    timeframe: 15m
+    feed: mt5
+  - symbol: BTCUSD_
+    timeframe: 15m
+    feed: mt5
+    guard:                  # bitcoin's own safety settings
+      market_hours: 24x7    # trades every day
+      max_spread: 0         # gold's spread limit would block every bitcoin trade
+```
+
+The limits in `risk:` (max open positions, trades per day, daily loss) are shared by all
+markets. The bot was built and tested for gold; run any other market on demo first.
+
 ### Step 5 - Check the installation
 
 Double-click **`windows\check.bat`**. It checks the whole chain without sending any order:
@@ -204,6 +223,7 @@ Put the password in `windows\secrets.bat` as `MT5_PASSWORD=...`, never in `confi
 |---|---|
 | `MT5 initialize() failed ... IPC timeout` | MT5 isn't running or is still starting. Open it, log in, and try again. With several terminals, set `mt5_path` |
 | `symbol 'XAUUSD' not found ... your broker has: XAUUSD.m` | put that exact name in `markets: symbol:` |
+| `lists several symbols in one line` | give each market its own `- symbol:` entry (Step 4, *Several markets*) |
 | `10027 AutoTrading disabled by client` | the **Algo Trading** button is off (Step 1.3) |
 | `Trading is not allowed on this login` | you logged in with the investor password; use the master password |
 | `10019 not enough money` | the account is too small for the risk setting; lower `risk_per_trade_pct` or add funds |

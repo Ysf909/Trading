@@ -20,7 +20,8 @@ from ..core.timeframes import timeframe_minutes
 from ..core.types import LONG, Bar, Signal
 from ..risk import AccountState
 from .broker import Broker
-from .mt5_common import ServerClock, allows_specified_expiry, connect, ensure_symbol, filling_for, server_time_now
+from .mt5_common import (ServerClock, allows_specified_expiry, connect, ensure_symbol, filling_for,
+                         margin_lot_cap, server_time_now)
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,11 @@ class MT5Broker(Broker):
         if acct is not None and self.cfg.max_leverage > 0 and info.trade_contract_size > 0:
             max_lots = acct.equity * self.cfg.max_leverage / (sig.entry * info.trade_contract_size)
             lots = min(lots, max_lots)
+        # ... nor more than max_margin_pct of the free margin at the broker's own margin rate
+        # (crypto / index CFDs often have much lower leverage than gold)
+        cap = margin_lot_cap(self.mt5, sig.symbol, sig.direction == LONG, sig.entry, self.cfg.max_margin_pct)
+        if cap is not None:
+            lots = min(lots, cap)
         step = info.volume_step
         lots = math.floor(lots / step) * step
         if lots < info.volume_min:

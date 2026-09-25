@@ -156,6 +156,24 @@ def filling_for(mt5: Any, info: Any) -> int:
     return mt5.ORDER_FILLING_RETURN
 
 
+def margin_lot_cap(mt5: Any, symbol: str, long: bool, price: float, max_margin_pct: float) -> float | None:
+    """Most lots whose margin stays within ``max_margin_pct`` of the free margin, or None if unknown."""
+    if max_margin_pct <= 0:
+        return None
+    acct = mt5.account_info()
+    free = getattr(acct, "margin_free", None) if acct is not None else None
+    if free is None:
+        return None
+    otype = mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL
+    try:
+        per_lot = mt5.order_calc_margin(otype, symbol, 1.0, float(price))
+    except Exception:  # noqa: BLE001 - older terminals / symbols without a margin rate
+        return None
+    if not per_lot or per_lot <= 0:
+        return None
+    return max(0.0, float(free)) * max_margin_pct / 100.0 / float(per_lot)
+
+
 def allows_specified_expiry(mt5: Any, info: Any) -> bool:
     return bool(int(getattr(info, "expiration_mode", 0) or 0) & int(getattr(mt5, "SYMBOL_EXPIRATION_SPECIFIED", 4)))
 

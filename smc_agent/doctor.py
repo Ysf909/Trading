@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .config import AppConfig, MarketConfig
+from .config import AppConfig, MarketConfig, guard_for
 from .core.timeframes import timeframe_minutes
 
 
@@ -209,10 +209,17 @@ class Doctor:
             similar = suggest_symbols(mt5, sym)
             self.add("FAIL", f"Symbol {sym!r} does not exist at this broker",
                      f"use the exact Market Watch name in markets[].symbol, e.g. {', '.join(similar)}" if similar
-                     else "open Market Watch (Ctrl+M), right-click > Symbols, and copy the gold symbol's exact name")
+                     else "open Market Watch (Ctrl+M), right-click > Symbols, and copy the symbol's exact name")
             return
         if not getattr(info, "visible", True):
             mt5.symbol_select(sym, True)
+        g = guard_for(self.cfg, m)
+        if m.guard:
+            self.add("INFO", f"{sym}: own guard settings " + ", ".join(f"{k}={v}" for k, v in m.guard.items()))
+        crypto = any(k in sym.upper() for k in ("BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "CRYPTO"))
+        if crypto and g.market_hours == "forex":
+            self.add("WARN", f"{sym}: looks like crypto but uses forex market hours (no weekend trading, closed Friday)",
+                     "add to this market:  guard: {market_hours: 24x7, max_spread: 0}")
         mode = getattr(info, "trade_mode", 4)
         if mode == getattr(mt5, "SYMBOL_TRADE_MODE_FULL", 4):
             self.add("OK", f"{sym}: tradable")
@@ -225,11 +232,13 @@ class Doctor:
             self.add("WARN", f"{sym}: no live price now (market closed?)", "run the check again when the market is open")
         else:
             spread = tick.ask - tick.bid
-            lim = self.cfg.guard.max_spread
+            lim = g.max_spread
             self.add("OK" if not lim or spread <= lim else "WARN",
                      f"{sym}: bid {tick.bid} / ask {tick.ask}, spread {spread:.2f}",
                      "" if not lim or spread <= lim else
-                     f"wider than guard.max_spread {lim} (normal around rollover/news; the guard skips entries meanwhile)")
+                     f"wider than the max_spread limit {lim}: every entry is skipped while it stays this wide. Normal "
+                     "around rollover/news; if it is this market's usual spread, give it its own "
+                     "guard: {max_spread: ...} (0 = judge by ATR only)")
         fill = filling_for(mt5, info)
         fill_name = {getattr(mt5, "ORDER_FILLING_FOK", 0): "FOK", getattr(mt5, "ORDER_FILLING_IOC", 1): "IOC"}.get(fill, "RETURN")
         expiry = "server-side expiry" if allows_specified_expiry(mt5, info) else "good-till-cancelled, the agent cancels expired orders"
@@ -265,16 +274,28 @@ class Doctor:
             risk_money = acct.equity * self.cfg.risk.risk_per_trade_pct / 100.0
             loss_per_lot = atr / info.trade_tick_size * info.trade_tick_value if info.trade_tick_size else 0.0
             if loss_per_lot > 0:
+                from .execution.mt5_common import margin_lot_cap
+
                 raw = risk_money / loss_per_lot
+                price = float(tick.ask) if tick is not None and tick.ask else float(c[-1])
+                cap = margin_lot_cap(mt5, sym, True, price, self.cfg.broker.max_margin_pct)
+                if cap is not None and cap < raw:
+                    self.add("INFO", f"{sym}: size limited to {cap:.2f} lots by margin "
+                                     f"(max {self.cfg.broker.max_margin_pct:g}% of the free margin per order)")
+                    raw = cap
                 lots = np.floor(raw / info.volume_step) * info.volume_step
                 min_risk = info.volume_min * loss_per_lot
-                if lots < info.volume_min:
+                if cap is not None and cap < info.volume_min:
+                    self.add("FAIL", f"{sym}: not enough free margin for the smallest lot ({info.volume_min})",
+                             "add funds, close other positions or raise broker.max_margin_pct")
+                elif lots < info.volume_min:
                     self.add("FAIL", f"{sym}: the smallest lot ({info.volume_min}) risks {min_risk:,.2f} {acct.currency} "
                                      f"with a typical stop, more than {self.cfg.risk.risk_per_trade_pct:g}% "
                                      f"({risk_money:,.2f})",
                              "every trade would be skipped: add funds or raise risk.risk_per_trade_pct")
                 else:
-                    self.add("OK", f"{sym}: a typical trade is {lots:.2f} lots risking {risk_money:,.2f} {acct.currency}")
+                    self.add("OK", f"{sym}: a typical trade is {lots:.2f} lots risking {lots * loss_per_lot:,.2f} "
+                                   f"{acct.currency} (1 ATR stop)")
                     if self.cfg.strategy.tp1_r > 0 and lots < 2 * info.volume_min:
                         self.add("WARN", f"{sym}: {lots:.2f} lots can't be split for the TP1 partial",
                                  "trades use one full target until the size allows two parts")
