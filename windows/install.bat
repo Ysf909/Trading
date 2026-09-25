@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0\.."
+rem Other programs (e.g. ZKBioTime) can set PYTHONHOME / PYTHONPATH for the whole PC, which makes
+rem every Python load THEIR library ("SRE module mismatch"). Ignore them here only.
+set "PYTHONHOME="
+set "PYTHONPATH="
 title SMC ICT Agent - install
 echo ============================================================
 echo   SMC ICT Agent - installation
@@ -11,7 +15,7 @@ rem Try every installed Python and keep the first 64-bit one, even if a 32-bit o
 set "PY="
 for %%C in ("py -3.12-64" "py -3.12" "py -3.11-64" "py -3.11" "py -3.13-64" "py -3.13" "py -3.10-64" "py -3.10" "py -3-64" "py -3" "python") do (
   if not defined PY (
-    %%~C -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 and sys.version_info[:2] >= (3, 10) else 1)" >nul 2>nul && set "PY=%%~C"
+    %%~C -c "import struct,sys,re,venv; sys.exit(0 if struct.calcsize('P') == 8 and sys.version_info[:2] >= (3, 10) else 1)" >nul 2>nul && set "PY=%%~C"
   )
 )
 if not defined PY goto nopython64

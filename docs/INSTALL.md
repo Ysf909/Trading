@@ -213,6 +213,7 @@ Put the password in `windows\secrets.bat` as `MT5_PASSWORD=...`, never in `confi
 | Times look wrong (sessions, news) | `check.bat` shows the broker clock it detected. If your broker isn't "New York + 7h", set `broker: mt5_server_time: +2` (or the right offset) |
 | `This Python is 32-bit` / `No 64-bit Python` | install the 64-bit Python from Step 2 (you can keep the 32-bit one), then run `install.bat` again |
 | `pip` errors mentioning MetaTrader5 | install **Python 3.12 64-bit** and run `install.bat` again |
+| `SRE module mismatch`, or a traceback through another program's folder (e.g. `C:\ZKBioTime\Python311`) | that program set `PYTHONHOME` / `PYTHONPATH` for the whole PC. The bot's `.bat` scripts ignore them, so use the latest scripts and always start the bot through them. Don't delete the variables, the other program needs them |
 
 For more detail, read the log in the bot's window and `state\journal.jsonl`. Every decision,
 order, fill, guard action and error is written there.
