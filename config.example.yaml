@@ -1,0 +1,137 @@
+# SMC / ICT agent - XAUUSD (gold) configuration. Copy to config.yaml and edit.
+# Every key is optional - anything left out uses the defaults in smc_agent/config.py.
+# Crypto users: see config.crypto.example.yaml.
+
+markets:                      # one entry per market - never several names in one symbol: line
+  - symbol: XAUUSD            # EXACT Market Watch name at your broker (XAUUSD, XAUUSD_, XAUUSD.m, GOLD ...)
+    timeframe: 15m            # entry timeframe; M5 / M15 / H1 all work
+    feed: mt5                 # mt5 (Windows + MT5 terminal) | csv (TradingView export) | yfinance
+    tv_symbol: XAUUSD         # TradingView ticker for webhook alerts (OANDA:XAUUSD -> XAUUSD)
+    # csv_path: data/OANDA_XAUUSD_15.csv   # for feed: csv
+
+  # A second market: remove the # in front of these lines and put your broker's exact name.
+  # - symbol: BTCUSD
+  #   timeframe: 15m
+  #   feed: mt5
+  #   tv_symbol: BTCUSD
+  #   guard:                  # this market's own guard settings; everything else comes from guard: below
+  #     market_hours: 24x7    # crypto trades every day (no Friday cut-off / weekend close)
+  #     max_spread: 0         # gold's 0.60 limit would block every bitcoin trade; 0 = judge by ATR only
+
+strategy:
+  swing_len: 20
+  internal_len: 5
+  models: both                # reversal | continuation | both
+  entry_mode: ce              # 50% of the FVG / order block
+  entry_expiry: 16            # a limit order lives 4 hours on M15
+  sl_buffer_atr: 0.2          # gold wicks through obvious levels - keep the stop a little further
+  min_rr: 1.5
+  tp_mode: liquidity
+  tp1_r: 1.5                  # take 50% profit at +1.5R and move the stop to entry (67% win rate in tests)
+  tp1_pct: 50                 # set tp1_r: 0 for one full target (fewer wins, more R per trade)
+  killzones: [london, ny_am]  # gold's best hours; used for the confluence score
+  killzone_filter: false      # true = only trade London / NY AM
+  min_score: 6                # A-grade setups only
+  day_tz: America/New_York    # broker day for gold: 17:00 NY -> 17:00 NY
+  day_roll_hour: 17
+
+guard:                        # the caution layer (docs/guard.md)
+  enabled: true
+  # top-down: W1 / D1 / H4 / H1 are read before every entry
+  mtf_timeframes: [60, 240, 1440, 10080]
+  mtf_block_opposing: [1440]  # never against the D1 trend
+  mtf_soft_opposing: [240]    # against H4 only from H4 discount (longs) / premium (shorts)
+  mtf_min_aligned: 1
+  mtf_pd_extreme: 0.9         # no longs in the top 10% of the H4/D1 range, no shorts in the bottom 10%
+  obstacle_check: true        # target capped before PDH/PWH, HTF swings and HTF FVGs (or trade refused)
+  # abnormal markets
+  shock_atr_mult: 4.0         # a candle or gap > 4x the normal range = news spike / flash move
+  shock_cooldown_min: 90
+  regime_max_ratio: 2.5       # stand aside when volatility is 2.5x normal
+  caution_ratio: 1.8          # half size above 1.8x
+  adr_max_mult: 1.3           # no new trades once the day has moved 1.3x its average range
+  # sessions (New York time)
+  market_hours: forex
+  rollover_start: "16:45"
+  rollover_end: "18:30"
+  friday_cutoff: "14:00"
+  weekend_close: "16:00"
+  weekend_action: close       # never hold gold over the weekend gap
+  sunday_open_until: "19:00"
+  holidays: ["12-24", "12-25", "12-31", "01-01"]
+  # news - gold reacts to every USD release
+  news: true
+  news_currencies: [USD]
+  news_min_impact: high       # medium adds retail sales, PPI, claims ...
+  news_before_min: 30
+  news_after_min: 30
+  news_open_action: close     # close | protect (stop to entry if in profit) | hold
+  news_file: ""               # optional CSV of events (also used by backtests)
+  std_windows: ["08:30", "10:00", "14:00"]
+  std_before_min: 10
+  std_after_min: 20
+  # losing streaks (in R)
+  max_consec_losses: 3
+  loss_pause_bars: 16         # 4 hours on M15
+  max_daily_loss_r: 3.0
+  max_weekly_loss_r: 6.0
+  max_drawdown_r: 12.0
+  # execution
+  max_spread: 0.60            # USD per ounce; skip entries when the spread is wider
+  max_spread_atr: 0.3
+  stale_bars: 3
+  structure_exit: false       # true = also exit on an internal CHoCH against the position
+
+risk:
+  risk_per_trade_pct: 0.5
+  max_daily_loss_pct: 2.0
+  max_open_positions: 2
+  max_trades_per_day: 4
+  one_position_per_symbol: true
+  min_rr: 1.5
+
+costs:
+  commission_pct: 0.002       # ~ spread cost on XAUUSD; adjust to your broker
+  slippage_pct: 0.005
+
+learner:
+  enabled: false
+  model_path: models/xauusd_edge.json
+  min_expected_r: 0.05
+
+ai:
+  enabled: false              # Claude reviews each setup with the full multi-timeframe risk context
+  model: claude-opus-5
+  effort: high
+  min_confidence: 0.6
+  bars_context: 96
+  fail_open: false
+
+broker:
+  kind: paper                 # paper = simulated | mt5 = real orders in MetaTrader 5 (demo account first!)
+  starting_equity: 10000      # paper only
+  state_path: state/paper_broker.json
+  mt5_magic: 909909           # tags the agent's orders in MT5 (it never touches other trades)
+  mt5_deviation: 30           # points of slippage allowed on market orders
+  max_leverage: 20
+  max_margin_pct: 50          # one order may use at most 50% of the free margin (crypto has low leverage)
+  mt5_server_time: auto       # clock of your broker's candles: auto | ny+7 | utc | +2 ... (smc-agent check shows it)
+  # Optional - by default the agent uses the account the MT5 terminal is logged into:
+  # mt5_login: 12345678       # account number; the password goes in windows\secrets.bat (MT5_PASSWORD)
+  # mt5_server: YourBroker-Demo
+  # mt5_path: C:\Program Files\YourBroker MetaTrader 5\terminal64.exe   # only with several MT5 installed
+
+notify:
+  telegram_token_env: TELEGRAM_BOT_TOKEN
+  telegram_chat_id_env: TELEGRAM_CHAT_ID
+  discord_webhook_env: DISCORD_WEBHOOK_URL
+
+webhook:
+  host: 0.0.0.0
+  port: 8080
+  passphrase_env: WEBHOOK_PASSPHRASE
+  execute: true
+
+journal_path: state/journal.jsonl
+warmup_bars: 6000             # ~2 months of M15 so D1 / W1 structure is established
+poll_delay_s: 5
