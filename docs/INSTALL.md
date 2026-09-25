@@ -74,11 +74,18 @@ didn't open.
 6. Open a **XAUUSD M15** chart and press `Home` a few times so MT5 downloads a few months of
    history.
 
-### Step 2 - Install Python
+### Step 2 - Install Python (64-bit)
 
-1. Go to <https://www.python.org/downloads/windows/> and download **Python 3.12.x, Windows
-   installer (64-bit)**.
-2. On the installer's first screen tick **Add python.exe to PATH**, then click **Install Now**.
+MetaTrader5 only works with **64-bit** Python. A 32-bit Python won't work.
+
+1. Download **Python 3.12 64-bit** directly:
+   <https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe>. The file name must end
+   in **`-amd64.exe`**.
+2. Run it, tick **Add python.exe to PATH** on the first screen, then click **Install Now**.
+
+If a 32-bit Python is already installed you can keep it. `install.bat` looks for the 64-bit one,
+and if it can't find one it opens this download for you. To see what is installed, open a
+Command Prompt and type `py -0p`: entries ending in `-32` are 32-bit.
 
 ### Step 3 - Install the bot
 
@@ -204,6 +211,7 @@ Put the password in `windows\secrets.bat` as `MT5_PASSWORD=...`, never in `confi
 | `the smallest lot risks ...` (check) | 0.01 lot is already more than your risk %; raise the risk % or the balance |
 | `Netting account` warning | TP1 can't be split; one full target is used. Ask the broker for a hedging account |
 | Times look wrong (sessions, news) | `check.bat` shows the broker clock it detected. If your broker isn't "New York + 7h", set `broker: mt5_server_time: +2` (or the right offset) |
+| `This Python is 32-bit` / `No 64-bit Python` | install the 64-bit Python from Step 2 (you can keep the 32-bit one), then run `install.bat` again |
 | `pip` errors mentioning MetaTrader5 | install **Python 3.12 64-bit** and run `install.bat` again |
 
 For more detail, read the log in the bot's window and `state\journal.jsonl`. Every decision,

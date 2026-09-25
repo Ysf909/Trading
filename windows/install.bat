@@ -6,24 +6,25 @@ echo ============================================================
 echo   SMC ICT Agent - installation
 echo ============================================================
 echo.
+rem MetaTrader5 only works with 64-bit Python (3.12 recommended).
+rem Try every installed Python and keep the first 64-bit one, even if a 32-bit one is on PATH.
 set "PY="
-py -3.12 --version >nul 2>nul && set "PY=py -3.12"
-if not defined PY py -3.11 --version >nul 2>nul && set "PY=py -3.11"
-if not defined PY py -3 --version >nul 2>nul && set "PY=py -3"
-if not defined PY python --version >nul 2>nul && set "PY=python"
-if not defined PY (
-  echo Python was not found.
-  echo Install Python 3.12 64-bit from https://www.python.org/downloads/windows/
-  echo and tick "Add python.exe to PATH" on the first screen, then run this again.
-  pause
-  exit /b 1
+for %%C in ("py -3.12-64" "py -3.12" "py -3.11-64" "py -3.11" "py -3.13-64" "py -3.13" "py -3.10-64" "py -3.10" "py -3-64" "py -3" "python") do (
+  if not defined PY (
+    %%~C -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 and sys.version_info[:2] >= (3, 10) else 1)" >nul 2>nul && set "PY=%%~C"
+  )
 )
-echo Using: %PY%
-%PY% -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 1)"
-if errorlevel 1 (
-  echo This Python is 32-bit. MetaTrader5 needs 64-bit Python 3.12.
-  pause
-  exit /b 1
+if not defined PY goto nopython64
+echo Using 64-bit Python: %PY%
+%PY% --version
+
+rem an environment made earlier with a 32-bit Python can't load MetaTrader5: rebuild it
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 1)" >nul 2>nul
+  if errorlevel 1 (
+    echo Removing the old 32-bit environment...
+    rmdir /s /q ".venv"
+  )
 )
 if not exist ".venv\Scripts\python.exe" (
   echo Creating the virtual environment...
@@ -61,3 +62,18 @@ echo   2. Double-click windows\check.bat and fix everything it reports
 echo ============================================================
 start "" notepad "config.yaml"
 pause
+exit /b 0
+
+:nopython64
+echo No 64-bit Python 3.10 - 3.13 was found on this PC.
+echo MetaTrader5 does not work with 32-bit Python.
+echo.
+echo   1. Download Python 3.12 64-bit - the download starts now:
+echo      https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+echo   2. Run it, tick "Add python.exe to PATH", then click "Install Now".
+echo      You can keep the 32-bit Python, both can be installed side by side.
+echo   3. Double-click windows\install.bat again.
+echo.
+start "" "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+pause
+exit /b 1
