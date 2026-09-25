@@ -170,7 +170,7 @@ class Doctor:
             self.add("OK", "Algo Trading is on")
         if getattr(ti, "tradeapi_disabled", False):
             self.add("FAIL", "Trading from Python is disabled in the terminal",
-                     "Tools > Options > Expert Advisors: untick 'Disable automated trading via external Python API'")
+                     "Tools > Options > Expert Advisors: untick 'Disable algorithmic (automated) trading via external Python API'")
 
     def _mt5_account(self, mt5: Any) -> Any:
         a = mt5.account_info()

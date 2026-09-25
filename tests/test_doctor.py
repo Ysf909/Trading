@@ -51,7 +51,7 @@ def test_algo_trading_off_and_python_api_disabled_fail(tmp_path):
     doc, _ = run(gold_cfg(tmp_path), fake)
     assert doc.failed
     report = doc.report()
-    assert "Algo Trading' button" in report and "Disable automated trading via external Python API" in report
+    assert "Algo Trading' button" in report and "trading via external Python API" in report
 
 
 def test_wrong_symbol_name_suggests_the_broker_symbol(tmp_path):

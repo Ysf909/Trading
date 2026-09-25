@@ -65,7 +65,7 @@ didn't open.
    account number, the **master** password (not the investor password) and the server.
 2. **Tools > Options > Expert Advisors**:
    * tick **Allow algorithmic trading**
-   * untick **Disable automated trading via external Python API** (if it is shown)
+   * untick **Disable algorithmic trading via external Python API** (older versions: *automated trading*), if it is shown
 3. Click the **Algo Trading** button in the top toolbar so it turns **green**.
 4. **Tools > Options > Charts > Max bars in chart**: choose **Unlimited**, then restart MT5.
 5. Press `Ctrl+M` (Market Watch). Right-click, choose **Symbols**, search *XAU* or *gold*,
