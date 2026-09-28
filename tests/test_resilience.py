@@ -123,3 +123,18 @@ def test_flatten_is_honoured_between_candles(tmp_path):
         stop.set()
         th.join(5)
     assert not th.is_alive()
+
+
+def test_each_candle_logs_a_status_line(tmp_path, caplog):
+    import logging
+
+    a, feed = agent(tmp_path, frame(BULL_REVERSAL), guard=GuardConfig(mtf_timeframes=[60]))
+    feed.n = 10
+    a.warmup()
+    feed.n = 11
+    with caplog.at_level(logging.INFO, logger="smc_agent.live"):
+        a.poll_market(a.markets[0])
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("XAUUSD ")]
+    assert len(lines) == 1
+    assert "NY close" in lines[0] and "setups: long" in lines[0] and "guard:" in lines[0]
+    assert "no trade" in lines[0] or "pending" in lines[0] or "open" in lines[0]

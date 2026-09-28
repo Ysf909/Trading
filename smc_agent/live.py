@@ -26,7 +26,7 @@ from .core.timeframes import timeframe_minutes
 from .core.types import LONG, SHORT, Signal
 from .data.feeds import Feed, make_feed
 from .execution.broker import Broker, PaperBroker
-from .guard import Guard, GuardDecision, apply_decision
+from .guard import NY, Guard, GuardDecision, apply_decision
 from .news import NewsCalendar
 from .notify import Journal, Notifier, format_signal
 from .risk import RiskManager
@@ -55,6 +55,10 @@ def make_broker(cfg: AppConfig) -> Broker:
 
         return MT5Broker(cfg.broker, tp1_r=cfg.strategy.tp1_r, tp1_pct=cfg.strategy.tp1_pct)
     raise ValueError(f"unknown broker {cfg.broker.kind!r}")
+
+
+def _trend_text(states: Any) -> str:
+    return ", ".join(f"{s.label} {'up' if s.trend > 0 else 'down' if s.trend < 0 else 'flat'}" for s in states)
 
 
 def _norm(sym: str) -> str:
@@ -170,8 +174,7 @@ class TradingAgent:
                     m.guard.on_bar(bar, m.engine)
             m.last_time = df.index[-1] if len(df) else None
             snap = m.engine.snapshot()
-            mtf = ", ".join(f"{s.label} {'+' if s.trend > 0 else '-' if s.trend < 0 else '0'}"
-                            for s in (m.guard.states() if m.guard else []))
+            mtf = _trend_text(m.guard.states() if m.guard else [])
             log.info("%s %s warmed up on %d bars | HTF %s, swing %s, internal %s | MTF %s", m.cfg.symbol,
                      m.cfg.timeframe, len(df), snap.get("htf_trend"), snap.get("swing_trend"),
                      snap.get("internal_trend"), mtf or "n/a")
@@ -228,7 +231,33 @@ class TradingAgent:
                 if signals and self.self_signals:  # act only on the newest candle
                     for sig in signals:
                         outcomes.append(self.handle_signal(sig, m.engine, m, bar.spread or None))
+                log.info(self.status_line(m, bar))
         return outcomes
+
+    def status_line(self, m: MarketRuntime, bar: Any) -> str:
+        """One line per candle so the console shows the agent is alive and what it waits for."""
+        from .core.types import LONG, SHORT
+
+        eng, g = m.engine, m.guard
+        closed = (bar.time + timedelta(minutes=m.minutes)).astimezone(NY)
+        trend = _trend_text(g.states() if g is not None else [])
+        stages = {LONG: ["-", "sell-side taken", "MSS, waiting for entry"],
+                  SHORT: ["-", "buy-side taken", "MSS, waiting for entry"]}
+        setups = f"long {stages[LONG][eng.rev[LONG].stage]}, short {stages[SHORT][eng.rev[SHORT].stage]}"
+        block = None
+        if self.halted():
+            block = "HALT file - no new trades"
+        elif g is not None and g.now is not None:
+            block = g.breaker_block() or g.session_block(g.now) or g.news_block(g.now) or g.volatility_block(eng)
+        try:
+            info = self.broker.position_info(m.cfg.symbol)
+        except Exception:  # noqa: BLE001 - status only
+            info = None
+        pos = "no trade" if info is None else (
+            f"{info['status']} {'long' if info['direction'] == 1 else 'short'}"
+            + (f" @ {info['fill_price']:.6g}" if info.get("fill_price") else ""))
+        return (f"{m.cfg.symbol} {closed:%H:%M} NY close {bar.close:.6g} | trend {trend or 'n/a'} | "
+                f"setups: {setups} | guard: {block or 'clear'} | {pos}")
 
     def manage_position(self, m: MarketRuntime, bar: Any) -> None:
         """Let the guard cancel / close / protect what is working on this market."""
