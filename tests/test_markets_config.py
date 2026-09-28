@@ -114,3 +114,23 @@ def test_check_warns_when_crypto_uses_forex_hours(tmp_path):
     doc.run()
     assert not any("looks like crypto" in c.title for c in doc.results)
     assert any("own guard settings" in c.title for c in doc.results)
+
+
+def test_profiles_override_the_listed_settings(tmp_path):
+    base = TWO_MARKETS + "strategy:\n  min_score: 6\n"
+    safe = load_config(write(tmp_path, base))
+    assert safe.profile == "safe" and safe.strategy.min_score == 6 and safe.guard.adr_max_mult == 1.3
+    active = load_config(write(tmp_path, "profile: active\n" + base))
+    assert active.strategy.min_score == 4  # wins over strategy.min_score in the file
+    assert active.guard.adr_max_mult == 0 and active.guard.mtf_soft_opposing == []
+    assert active.guard.mtf_block_opposing == [1440] and active.guard.obstacle_check  # always kept
+    assert active.risk.risk_per_trade_pct == safe.risk.risk_per_trade_pct
+    btc = guard_for(active, "BTCUSD_")  # a market's own settings still apply on top
+    assert btc.market_hours == "24x7" and btc.adr_max_mult == 0
+    balanced = load_config(write(tmp_path, "profile: Balanced\n" + base))
+    assert balanced.profile == "balanced" and balanced.strategy.min_score == 6 and balanced.guard.mtf_min_aligned == 0
+
+
+def test_unknown_profile_is_explained(tmp_path):
+    with pytest.raises(ValueError, match="safe, balanced, active"):
+        load_config(write(tmp_path, "profile: yolo\n" + TWO_MARKETS))

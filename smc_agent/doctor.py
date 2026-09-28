@@ -85,6 +85,10 @@ class Doctor:
                 if m.feed.lower() != "mt5":
                     self.add("WARN", f"{m.symbol}: trades on MT5 but reads candles from {m.feed}",
                              "use feed: mt5 so the agent sees your broker's prices")
+        prof = {"safe": "fewest trades, strictest filters", "balanced": "more trades, same quality in tests",
+                "active": "most trades, lower win rate and deeper drawdowns"}.get(cfg.profile, "")
+        self.add("INFO", f"Profile: {cfg.profile} ({prof}), minimum setup score {cfg.strategy.min_score}/10",
+                 "change with  profile: safe | balanced | active  at the top of config.yaml")
         r = cfg.risk.risk_per_trade_pct
         self.add("OK" if r <= 1.0 else "WARN", f"Risk per trade {r:g}% of equity",
                  "" if r <= 1.0 else "above 1% a normal losing streak hurts a lot; 0.25-1% is typical")

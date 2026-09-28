@@ -94,6 +94,7 @@ dispAtr      = input.float(1.0, "Displacement body (x ATR)", minval = 0.1, step 
 htfFilter    = input.bool(false, "Only trade with HTF bias", group = G_SET)
 kzFilter     = input.bool(false, "Only trade inside scoring killzones", group = G_SET)
 minScore     = input.int(6, "Min confluence score (0-10)", minval = 0, maxval = 10, group = G_SET, tooltip = "HTF bias 2, premium/discount 2, major liquidity swept 1, OB+FVG overlap 1, killzone 1, displacement 1, swing trend 1, RR >= 3 1. 6+ = grade A.")
+profileIn    = input.string("Safe (my settings)", "Trading profile", options = ["Safe (my settings)", "Balanced", "Active"], group = G_SET, tooltip = "Same profiles as the agent (profile: in config.yaml). Balanced: no daily-range limit and looser H4 rules (tests: 96 instead of 69 trades, same 67% win rate). Active: Balanced + grade B setups from score 4 (223 trades, 56% win rate, deeper drawdowns). The daily-trend rule, target obstacles, news and loss limits always stay.")
 showTrades   = input.bool(true, "Draw entry / stop / target", group = G_SET)
 showDash     = input.bool(true, "Dashboard", group = G_SET, inline = "db")
 riskPct      = input.float(0.5, "Risk per trade (% of equity)", minval = 0.01, step = 0.05, group = G_SET, tooltip = "Position size = equity x risk% / stop distance.")
@@ -188,6 +189,12 @@ alertGuard   = input.bool(true, "Guard actions (cancel / close before news, week
 passphrase   = input.string("change-me", "Webhook passphrase (JSON)", group = G_AL, tooltip = "Must equal WEBHOOK_PASSPHRASE of `smc-agent webhook`. Letters and digits only.")
 bool readableOn = alertMode != "JSON (agent webhook)"
 bool jsonOn     = alertMode != "Readable (phone)"
+// trading profile: overrides the inputs it changes (same as the agent's profile: setting)
+bool  profLoose    = profileIn != "Safe (my settings)"
+int   minScoreE    = profileIn == "Active" ? 4 : minScore
+float adrMaxE      = profLoose ? 0.0 : adrMax
+int   mtfMinAlignE = profLoose ? 0 : mtfMinAlign
+float mtfPdExtE    = profLoose ? 1.0 : mtfPdExt
 
 const color C_BULL = #089981
 const color C_BEAR = #F23645
@@ -906,7 +913,7 @@ f_build(int d, Zone zone, float sl, bool majorSweep, array<Level> levels, array<
                         ok := false
                     if kzFilter and not inKz
                         ok := false
-                    if score < minScore
+                    if score < minScoreE
                         ok := false
     [ok, entry, tp, rr, riskAtr, score, tpKind, pdOk, confl, disp, retr, legFar]
 
@@ -1543,7 +1550,7 @@ if useGuard
         whyVol := "volatility: shock (" + gs.shockWhy + ") - cooling down"
     else if not na(regime) and regime > regimeMax
         whyVol := "volatility: extreme regime (ATR " + str.tostring(regime, "#.#") + "x its average)"
-    else if not na(adrD) and adrD > 0 and adrMax > 0 and dH - dL >= adrMax * adrD
+    else if not na(adrD) and adrD > 0 and adrMaxE > 0 and dH - dL >= adrMaxE * adrD
         whyVol := "volatility: day already moved " + str.tostring((dH - dL) / adrD, "#.#") + "x its average range"
 
 string preWhy = f_add(f_add(f_add(whyBreaker, whySession), whyNews), whyVol)
@@ -1571,7 +1578,7 @@ f_guardCheck(int d, float e, float sl, float tp, array<TFS> tfl, array<Level> lv
                 if na(pos) or (d == 1 ? pos > 0.5 : pos < 0.5)
                     blocks := f_add(blocks, "mtf: " + tf.lbl + " trend is " + (tf.trend == 1 ? "bullish" : "bearish") + " and entry is not in its " + (d == 1 ? "discount" : "premium"))
     if usable > 0
-        if aligned < math.min(mtfMinAlign, usable)
+        if aligned < math.min(mtfMinAlignE, usable)
             blocks := f_add(blocks, "mtf: only " + str.tostring(aligned) + "/" + str.tostring(usable) + " higher timeframes agree")
     else if ups > 0
         blocks := f_add(blocks, "mtf: higher-timeframe structure not established yet")
@@ -1580,9 +1587,9 @@ f_guardCheck(int d, float e, float sl, float tp, array<TFS> tfl, array<Level> lv
             if tf.sec == biasS or tf.sec == structS
                 float pos = f_rangePos(tf, e)
                 if not na(pos)
-                    if d == 1 and pos > mtfPdExt
+                    if d == 1 and pos > mtfPdExtE
                         blocks := f_add(blocks, "mtf: buying at " + str.tostring(pos * 100, "#") + "% of the " + tf.lbl + " range (premium)")
-                    else if d == -1 and pos < 1 - mtfPdExt
+                    else if d == -1 and pos < 1 - mtfPdExtE
                         blocks := f_add(blocks, "mtf: selling at " + str.tostring(pos * 100, "#") + "% of the " + tf.lbl + " range (discount)")
             float gTop = d == 1 ? tf.sT : tf.bT
             float gBot = d == 1 ? tf.sB : tf.bB
@@ -1633,7 +1640,7 @@ float  gTpL   = sigTPL
 string gWhyL  = ""
 string gNoteL = ""
 if useGuard and armL
-    [okG, tpG, whyG, noteG] = f_guardCheck(1, sigEL, sigSLL, sigTPL, tfs, levels, atr, preWhy, biasSec, structSec)
+    [okG, tpG, whyG, noteG] = f_guardCheck(1, sigEL, sigSLL, sigTPL, tfs, levels, atr, preWhy, biasSec, profLoose ? -1 : structSec)
     gOkL   := okG
     gTpL   := tpG
     gWhyL  := whyG
@@ -1643,7 +1650,7 @@ float  gTpS   = sigTPS
 string gWhyS  = ""
 string gNoteS = ""
 if useGuard and armS
-    [okG, tpG, whyG, noteG] = f_guardCheck(-1, sigES, sigSLS, sigTPS, tfs, levels, atr, preWhy, biasSec, structSec)
+    [okG, tpG, whyG, noteG] = f_guardCheck(-1, sigES, sigSLS, sigTPS, tfs, levels, atr, preWhy, biasSec, profLoose ? -1 : structSec)
     gOkS   := okG
     gTpS   := tpG
     gWhyS  := whyG
@@ -1910,7 +1917,7 @@ f_setupTxt(Rev st, int d) =>
 var table dash = table.new(f_pos(dashPos), 2, 24, bgcolor = color.new(#131722, 15), frame_color = color.new(color.gray, 60), frame_width = 1, border_color = color.new(color.gray, 85), border_width = 1)
 if showDash and barstate.islast
     color tc = color.new(color.white, 10)
-    f_row(dash, 0, "SMC ICT Pro", "min score " + str.tostring(minScore) + (useGuard ? " | guard ON" : " | guard OFF"), tc)
+    f_row(dash, 0, "SMC ICT Pro", "min score " + str.tostring(minScoreE) + " | " + (profLoose ? profileIn : "Safe") + (useGuard ? " | guard ON" : " | guard OFF"), tc)
     int r = 1
     for tf in tfs
         if tf.up

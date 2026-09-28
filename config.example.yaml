@@ -2,6 +2,14 @@
 # Every key is optional - anything left out uses the defaults in smc_agent/config.py.
 # Crypto users: see config.crypto.example.yaml.
 
+# How picky the agent is (tests on 14 markets, same entries, 50% at 1.5R then stop to entry):
+#   safe      69 trades, 67% won, +0.72R per trade, worst drawdown 3.1R   (strictest)
+#   balanced  96 trades, 67% won, +0.73R per trade, worst drawdown 4.1R   (no daily-range limit, looser H4 rules)
+#   active   223 trades, 56% won, +0.40R per trade, worst drawdown 7.1R   (balanced + grade B setups)
+# A profile overrides the settings it changes below. Risk per trade, loss limits, news, weekend and
+# "never against the daily trend" protection are the same in every profile.
+profile: safe
+
 markets:                      # one entry per market - never several names in one symbol: line
   - symbol: XAUUSD            # EXACT Market Watch name at your broker (XAUUSD, XAUUSD_, XAUUSD.m, GOLD ...)
     timeframe: 15m            # entry timeframe; M5 / M15 / H1 all work

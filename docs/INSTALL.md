@@ -115,6 +115,14 @@ broker:
 Everything else is already set for gold: the risk guard, news, sessions, and the TP1 partial at
 1.5R. Each line is explained in the file itself.
 
+**More or fewer trades:** the first setting in the file is `profile:`.
+- `safe` takes the fewest, cleanest trades.
+- `balanced` takes about 40% more at the same win rate in tests.
+- `active` takes about 3x more trades, with a lower win rate and deeper drawdowns.
+
+Risk per trade, loss limits, news and weekend protection are the same in all three. The table is
+in [docs/strategy.md](strategy.md#trading-profiles-more-trades-vs-more-filtering).
+
 **Several markets** (e.g. gold and bitcoin): give each one its own entry. Never put several
 names in one `symbol:` line.
 

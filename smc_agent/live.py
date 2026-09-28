@@ -444,7 +444,8 @@ class TradingAgent:
     def run_forever(self, stop: threading.Event | None = None) -> None:
         stop = stop or threading.Event()
         self.warmup()
-        log.info("agent running on %d market(s) with %s broker", len(self.markets), self.broker.name)
+        log.info("agent running on %d market(s) with %s broker, profile %s (min score %s)", len(self.markets),
+                 self.broker.name, self.cfg.profile, self.cfg.strategy.min_score)
         while not stop.is_set():
             deadline = time.time() + self._next_wake()
             while not stop.is_set() and time.time() < deadline:

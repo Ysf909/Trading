@@ -116,6 +116,31 @@ TradingView indicator. When TP1 is hit, half the position closes and the stop of
 the entry. From then on the trade can only end in profit, apart from a gap through the entry.
 Same caveats as above: in-sample, not gold, costs excluded.
 
+### Trading profiles: more trades vs. more filtering
+
+`profile:` at the top of `config.yaml` (and *Trading profile* in the TradingView indicator) sets how
+picky the agent is. Same 14 datasets, guard on, partial take-profit 50% at 1.5R:
+
+| Profile | What changes | Trades | Win rate | Avg R | Total R | Profit factor | Worst drawdown |
+|---|---|---|---|---|---|---|---|
+| **safe** (default) | everything on | 69 | 67% | +0.72 | +49.8R | 3.20 | 3.1R |
+| **balanced** | no daily-range (ADR) limit; the H4 counter-trend, range-extreme and "n timeframes agree" rules off | 96 | 67% | +0.73 | +70.5R | 3.27 | 4.1R |
+| **active** | balanced + grade B setups (score 4+ instead of 6+) | 223 | 56% | +0.40 | +89.1R | 1.97 | 7.1R |
+
+Every profile keeps the same protections:
+- the risk per trade and the daily, weekly and drawdown loss limits in R;
+- never trading against the daily trend;
+- targets capped before higher-timeframe obstacles;
+- the news calendar, sessions and weekend rules;
+- volatility-shock pauses and the spread checks.
+
+Loosening further was tested and rejected. Turning off the obstacle refusal added trades but no
+profit, and it started showing an "edge" on random-walk data, which is a warning sign. Removing the
+guard entirely at score 4-5 more than doubled the worst drawdown (12.8R).
+
+Same caveats as above: in-sample, not gold, costs excluded. At 0.5% risk per trade, 7.1R is a
+drawdown of about 3.5% of the account.
+
 ## 5. The learner
 
 `smc_agent/ai/learner.py` fits `P(target before stop)` from the setup's confluence flags, reward:risk

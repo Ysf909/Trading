@@ -252,6 +252,7 @@ class WebhookConfig:
 
 @dataclass
 class AppConfig:
+    profile: str = "safe"  # safe | balanced | active: how picky the agent is (see PROFILES)
     markets: list[MarketConfig] = field(default_factory=lambda: [MarketConfig()])
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     guard: GuardConfig = field(default_factory=GuardConfig)
@@ -319,12 +320,43 @@ def guard_for(cfg: AppConfig, market: MarketConfig | str | None) -> GuardConfig:
     return g
 
 
+# Trading profiles: how picky the agent is. A profile overrides the settings it lists (strategy / guard),
+# whatever config.yaml says for them. The risk per trade, the loss limits and the news / weekend
+# protection stay the same in every profile. Numbers: docs/strategy.md ("Trading profiles").
+PROFILES: dict[str, dict[str, dict[str, Any]]] = {
+    "safe": {},
+    # the daily-range limit, the H4 counter-trend rule, the range-extreme rule and the "n timeframes must
+    # agree" rule are off; the D1 rule (never against the daily trend) and the target obstacles stay
+    "balanced": {
+        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0},
+    },
+    # balanced + grade B setups (confluence score 4+ instead of 6+)
+    "active": {
+        "strategy": {"min_score": 4},
+        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0},
+    },
+}
+
+
+def apply_profile(cfg: AppConfig) -> None:
+    name = (cfg.profile or "safe").strip().lower()
+    if name not in PROFILES:
+        raise ValueError(f"profile must be one of {', '.join(PROFILES)} (got {cfg.profile!r})")
+    cfg.profile = name
+    p = PROFILES[name]
+    if p.get("strategy"):
+        cfg.strategy = replace(cfg.strategy, **p["strategy"])
+    if p.get("guard"):
+        cfg.guard = replace(cfg.guard, **p["guard"])
+
+
 def load_config(path: str | os.PathLike | None) -> AppConfig:
     if path is None:
         cfg = AppConfig()
     else:
         raw = yaml.safe_load(Path(path).read_text()) or {}
         cfg = _build(AppConfig, raw)
+    apply_profile(cfg)
     cfg.strategy.validate()
     cfg.guard.validate()
     _check_markets(cfg.markets)

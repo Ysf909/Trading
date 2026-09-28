@@ -126,6 +126,14 @@ On by default, same rules as the Python agent (see [docs/guard.md](../docs/guard
 
 Alerts *Setup blocked by guard* and *Guard acted on trade* tell you when it steps in.
 
+## Trading profile
+
+*Setups → Trading profile* offers the same three profiles as the agent. *Safe (my settings)* uses
+the inputs as you set them. *Balanced* drops the daily-range limit and the looser H4 rules, which
+gave more trades at the same win rate in tests. *Active* is Balanced plus grade B setups (score
+4+), for about 3x more trades with a lower win rate. The dashboard's first row shows the profile
+in use. The table is in [docs/strategy.md](../docs/strategy.md#trading-profiles-more-trades-vs-more-filtering).
+
 ## Recommended settings for XAUUSD
 
 * Chart: M15 (or M5) on OANDA:XAUUSD / your broker's gold feed. SMT against OANDA:XAGUSD (default).
