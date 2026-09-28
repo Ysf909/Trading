@@ -162,7 +162,15 @@ bot.
 ### Step 8 - Real orders on the demo account
 
 1. In `config.yaml` set `broker: kind: mt5`. Keep MT5 logged in to the **demo** account.
-2. Run `check.bat` again, then `start_agent.bat`.
+2. Run `check.bat` again.
+3. Double-click **`windows\test_connection.bat`** and type `YES`. It places one minimum-lot BUY
+   LIMIT far below the market, checks that the broker accepted it, and cancels it straight away.
+   It can't fill. If you see **Connection test PASSED**, the bot can trade on this account; the
+   order also appears in MT5 under *Toolbox > History* and *Toolbox > Journal*. If it fails, the
+   line says why (for example Algo Trading off, market closed, trading disabled).
+4. Start **`start_agent.bat`**. The first lines must say `mt5: orders go to DEMO account ...` and
+   end with `agent running ... with mt5 broker`. If they say `paper broker`, `config.yaml` still
+   has `kind: paper`.
 3. The bot's orders appear in MT5 (*Toolbox > Trade*) with their SL and TP:
    * a limit order at the entry, with the stop and the target
    * on a hedging account, two orders: the TP1 half and the runner
@@ -191,6 +199,7 @@ warning; read it before starting. Start with the minimum risk.
 | `resume_trading.bat` | allows new trades again (after the guard's drawdown halt, restart `start_agent.bat` instead) |
 | `close_everything.bat` | cancels all its orders and closes all its positions within seconds, then pauses |
 | `check.bat` / `scan.bat` | installation check / what the bot sees on the market now |
+| `test_connection.bat` | proves the bot can trade on the account: places and cancels one tiny far-away order |
 
 If the bot stops (PC off, window closed), its open trades **keep their stop loss and take
 profit at the broker**. When it restarts, it finds and manages them again.
@@ -224,6 +233,7 @@ Put the password in `windows\secrets.bat` as `MT5_PASSWORD=...`, never in `confi
 | `MT5 initialize() failed ... IPC timeout` | MT5 isn't running or is still starting. Open it, log in, and try again. With several terminals, set `mt5_path` |
 | `symbol 'XAUUSD' not found ... your broker has: XAUUSD.m` | put that exact name in `markets: symbol:` |
 | `lists several symbols in one line` | give each market its own `- symbol:` entry (Step 4, *Several markets*) |
+| No trades and an empty MT5 journal | the window says `paper broker`: set `broker: kind: mt5`. With `mt5 broker` it only trades grade-A setups that pass the guard, so quiet days are normal; the status line each candle shows what it waits for. `test_connection.bat` proves the link |
 | `10027 AutoTrading disabled by client` | the **Algo Trading** button is off (Step 1.3) |
 | `Trading is not allowed on this login` | you logged in with the investor password; use the master password |
 | `10019 not enough money` | the account is too small for the risk setting; lower `risk_per_trade_pct` or add funds |

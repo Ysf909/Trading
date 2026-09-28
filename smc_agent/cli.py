@@ -246,7 +246,7 @@ def cmd_webhook(args: argparse.Namespace, cfg: AppConfig) -> None:
 def cmd_check(args: argparse.Namespace, cfg: AppConfig) -> None:
     from .doctor import Doctor
 
-    doc = Doctor(cfg)
+    doc = Doctor(cfg, test_order=getattr(args, "test_order", False))
     doc.run()
     print(f"SMC agent check - {args.config or 'default settings'}\n")
     print(doc.report())
@@ -307,6 +307,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_webhook)
 
     sp = sub.add_parser("check", help="verify the installation before trading (sends no orders)")
+    sp.add_argument("--test-order", action="store_true",
+                    help="also place a minimum-size BUY LIMIT far below the market and cancel it at once "
+                         "(proves the agent can trade on the account; no position is opened)")
     sp.set_defaults(func=cmd_check)
     return p
 

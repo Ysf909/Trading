@@ -51,6 +51,29 @@ class MT5Broker(Broker):
         self.tp1_r = tp1_r
         self.tp1_pct = tp1_pct
         self.tracked: dict[str, _Tracked] = {}
+        self._announce()
+
+    def _announce(self) -> None:
+        """Say which account the orders go to (and shout if the terminal can't trade)."""
+        mt5 = self.mt5
+        a = mt5.account_info()
+        if a is None:
+            log.warning("mt5: NO ACCOUNT LOGGED IN - log in to the MT5 terminal (File > Login to Trade Account)")
+            return
+        kind = {getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", 0): "DEMO", getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", 2): "REAL"}
+        hedging = a.margin_mode == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2)
+        log.info("mt5: orders go to %s account %s on %s (%s), equity %s %.2f, %s", kind.get(a.trade_mode, "CONTEST"),
+                 a.login, a.server, getattr(a, "company", ""), getattr(a, "currency", ""), a.equity,
+                 "hedging" if hedging else "netting")
+        ti = mt5.terminal_info()
+        if ti is not None and not ti.trade_allowed:
+            log.warning("mt5: ALGO TRADING IS OFF in the terminal - orders will be refused. "
+                        "Click the 'Algo Trading' button in MT5 so it turns green.")
+        if ti is not None and getattr(ti, "tradeapi_disabled", False):
+            log.warning("mt5: trading from Python is disabled - Tools > Options > Expert Advisors: untick "
+                        "'Disable algorithmic trading via external Python API'")
+        if not getattr(a, "trade_allowed", True):
+            log.warning("mt5: this login can't trade (investor password?) - log in with the master password")
 
     # ------------------------------------------------------------ account
     def equity(self) -> float:

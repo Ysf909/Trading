@@ -95,3 +95,58 @@ def test_paper_config_needs_no_terminal(tmp_path):
     doc = Doctor(cfg, connect=lambda b: pytest.fail("must not connect"))
     doc.run()
     assert doc.failed and "missing.csv" in doc.report()
+
+
+def test_connection_test_places_and_cancels_a_far_away_order(tmp_path):
+    fake = fake_terminal()
+    doc = Doctor(gold_cfg(tmp_path), connect=lambda b: fake, test_order=True)
+    doc.run()
+    assert not doc.failed, doc.report()
+    assert "Connection test PASSED" in doc.report()
+    sent = [r for r in fake.requests if r["action"] == fake.TRADE_ACTION_PENDING]
+    assert len(sent) == 1 and sent[0]["volume"] == 0.01
+    assert sent[0]["price"] <= fake.bid * 0.9 + 0.01  # far below the market: can't fill
+    assert sent[0]["sl"] < sent[0]["price"] < sent[0]["tp"]
+    assert not fake.orders and not fake.positions  # cancelled, nothing opened
+
+
+def test_connection_test_explains_a_refusal(tmp_path):
+    fake = fake_terminal()
+    doc = Doctor(gold_cfg(tmp_path), connect=lambda b: fake, test_order=True)
+    fake.algo_trading = True
+    real_send = fake.order_send
+    fake.order_send = lambda req: (type("R", (), {"retcode": 10017, "order": 0, "comment": "Trade disabled"})()
+                                   if req["action"] == fake.TRADE_ACTION_PENDING else real_send(req))
+    doc.run()
+    assert doc.failed and "trading is disabled for this account" in doc.report()
+
+
+def test_connection_test_skipped_when_setup_is_broken(tmp_path):
+    fake = fake_terminal()
+    fake.algo_trading = False
+    doc = Doctor(gold_cfg(tmp_path), connect=lambda b: fake, test_order=True)
+    doc.run()
+    assert "Connection test skipped" in doc.report() and not fake.requests
+
+
+def test_paper_mode_on_mt5_prices_is_flagged(tmp_path):
+    cfg = gold_cfg(tmp_path)
+    cfg.broker.kind = "paper"
+    doc, _ = run(cfg, fake_terminal())
+    assert any(c.status == "WARN" and "PAPER mode" in c.title for c in doc.results)
+
+
+def test_broker_announces_the_account(monkeypatch, caplog):
+    import logging
+    import sys
+
+    fake = fake_terminal()
+    fake.algo_trading = False
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    from smc_agent.execution.mt5_broker import MT5Broker
+
+    with caplog.at_level(logging.INFO):
+        MT5Broker(BrokerConfig(kind="mt5"))
+    text = caplog.text
+    assert "orders go to DEMO account 5012345 on DemoBroker-Server" in text
+    assert "ALGO TRADING IS OFF" in text

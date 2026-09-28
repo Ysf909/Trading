@@ -27,10 +27,11 @@ class Check:
 
 
 class Doctor:
-    def __init__(self, cfg: AppConfig, connect: Callable[[Any], Any] | None = None) -> None:
+    def __init__(self, cfg: AppConfig, connect: Callable[[Any], Any] | None = None, test_order: bool = False) -> None:
         self.cfg = cfg
         self.results: list[Check] = []
         self._connect = connect
+        self.test_order = test_order
 
     # ------------------------------------------------------------ helpers
     def add(self, status: str, title: str, fix: str = "") -> None:
@@ -74,8 +75,11 @@ class Doctor:
         names = ", ".join(f"{m.symbol} {m.timeframe} ({m.feed})" for m in cfg.markets)
         self.add("INFO", f"Broker: {kind} | markets: {names}")
         if kind == "paper":
-            self.add("INFO", "Paper trading: orders are simulated, no money at risk",
-                     "set broker.kind: mt5 in config.yaml when the paper results look right")
+            on_mt5 = any(m.feed.lower() == "mt5" for m in cfg.markets)
+            self.add("WARN" if on_mt5 else "INFO",
+                     "PAPER mode: trades are only simulated - nothing is sent to MT5 and the MT5 journal stays empty",
+                     "to trade on the account MT5 is logged into, set  broker: kind: mt5  in config.yaml "
+                     "(demo account first) and restart start_agent.bat")
         if kind == "mt5":
             for m in cfg.markets:
                 if m.feed.lower() != "mt5":
@@ -143,6 +147,12 @@ class Doctor:
             for m in self.cfg.markets:
                 if m.symbol in symbols:
                     self._mt5_symbol(mt5, m, acct, clock, filling_for, allows_specified_expiry, suggest_symbols)
+            if self.test_order:
+                target = next((m for m in self.cfg.markets if m.symbol in symbols), None)
+                if self.failed:
+                    self.add("FAIL", "Connection test skipped: fix the problems above first")
+                elif target is not None:
+                    self._mt5_test_order(mt5, target, clock)
             mine_p = [p for p in (mt5.positions_get() or []) if p.magic == b.mt5_magic]
             mine_o = [o for o in (mt5.orders_get() or []) if o.magic == b.mt5_magic]
             if mine_p or mine_o:
@@ -153,6 +163,77 @@ class Doctor:
                 mt5.shutdown()
             except Exception:  # noqa: BLE001
                 pass
+
+    RETCODES = {
+        10006: ("the broker rejected the order", "try again; if it persists ask the broker"),
+        10013: ("invalid request", "send this output to support"),
+        10014: ("invalid volume", "the symbol's minimum lot / lot step is unusual - send this output to support"),
+        10015: ("invalid price", "run the test again when the market is open"),
+        10016: ("invalid stops", "the broker's minimum stop distance is larger than expected"),
+        10017: ("trading is disabled for this account or symbol", "ask the broker; check the account type"),
+        10018: ("the market is closed", "run the test again during market hours"),
+        10019: ("not enough money", "add funds or use a smaller symbol"),
+        10022: ("invalid order expiration", "set broker.mt5_server_time (see check output) and try again"),
+        10024: ("too many requests", "wait a minute and try again"),
+        10026: ("automated trading is disabled by the broker's server", "ask the broker to enable algo trading"),
+        10027: ("Algo Trading is switched off in the terminal", "click the 'Algo Trading' button so it turns green"),
+        10030: ("unsupported filling mode", "send this output to support"),
+        10031: ("no connection to the trade server", "check the internet connection / MT5 login"),
+        10033: ("too many pending orders", "delete old pending orders in MT5"),
+    }
+
+    def _mt5_test_order(self, mt5: Any, m: MarketConfig, clock: Any) -> None:
+        """Place a minimum-size BUY LIMIT far below the market and cancel it: proves the whole order path
+        (Algo Trading, account permissions, symbol, volume, stops, expiry) without opening a position."""
+        from .execution.mt5_common import allows_specified_expiry, server_time_now
+
+        b = self.cfg.broker
+        sym = m.symbol
+        info = mt5.symbol_info(sym)
+        tick = mt5.symbol_info_tick(sym)
+        if info is None or tick is None or not tick.bid:
+            self.add("WARN", f"Connection test: no live price for {sym}", "run it again when the market is open")
+            return
+        step = getattr(info, "trade_tick_size", 0) or getattr(info, "point", 0) or 0.01
+        digits = int(getattr(info, "digits", 5))
+
+        def rnd(x: float) -> float:
+            return round(round(x / step) * step, digits)
+
+        price = rnd(tick.bid * 0.90)
+        req: dict[str, Any] = {
+            "action": mt5.TRADE_ACTION_PENDING, "symbol": sym, "volume": float(info.volume_min),
+            "type": mt5.ORDER_TYPE_BUY_LIMIT, "price": price, "sl": rnd(price * 0.99), "tp": rnd(price * 1.02),
+            "deviation": b.mt5_deviation, "magic": b.mt5_magic, "comment": "smc connection test",
+            "type_filling": mt5.ORDER_FILLING_RETURN,
+        }
+        if allows_specified_expiry(mt5, info):
+            req.update(type_time=mt5.ORDER_TIME_SPECIFIED, expiration=server_time_now(mt5, sym, clock) + 3600)
+        else:
+            req.update(type_time=mt5.ORDER_TIME_GTC)
+        res = mt5.order_send(req)
+        if res is None:
+            self.add("FAIL", f"Connection test: MT5 returned no answer ({mt5.last_error()})",
+                     "restart the MT5 terminal and try again")
+            return
+        if res.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED):
+            what, fix = self.RETCODES.get(int(res.retcode), (getattr(res, "comment", "") or "rejected", ""))
+            closed = int(res.retcode) == 10018
+            self.add("WARN" if closed else "FAIL",
+                     f"Connection test: the broker refused the test order - {what} (code {res.retcode})", fix)
+            return
+        ticket = res.order
+        seen = bool(mt5.orders_get(ticket=ticket))
+        rem = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": ticket})
+        removed = rem is not None and rem.retcode == mt5.TRADE_RETCODE_DONE
+        if not removed:
+            self.add("FAIL", f"Connection test: order #{ticket} was placed but could not be cancelled",
+                     "delete it in MT5: Toolbox > Trade, right-click the order > Delete")
+            return
+        self.add("OK", f"Connection test PASSED: BUY LIMIT {info.volume_min} {sym} @ {price} was accepted by the broker "
+                       f"(ticket #{ticket}{'' if seen else ', not listed yet'}) and cancelled again - the agent can "
+                       "trade on this account",
+                 "you can see it in MT5: Toolbox > History (Orders) and Toolbox > Journal")
 
     def _mt5_terminal(self, mt5: Any) -> None:
         ti = mt5.terminal_info()

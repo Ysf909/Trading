@@ -103,6 +103,8 @@ class FakeMT5:
     def order_send(self, req):
         self.requests.append(req)
         a = req["action"]
+        if not self.algo_trading and a != self.TRADE_ACTION_REMOVE:
+            return NS(retcode=10027, order=0, comment="AutoTrading disabled by client")
         if a == self.TRADE_ACTION_PENDING or (a == self.TRADE_ACTION_DEAL and "position" not in req):
             self.opened += 1
             if self.reject_after is not None and self.opened > self.reject_after:
