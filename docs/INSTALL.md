@@ -169,7 +169,9 @@ bot.
 
 ### Step 8 - Real orders on the demo account
 
-1. In `config.yaml` set `broker: kind: mt5`. Keep MT5 logged in to the **demo** account.
+1. Double-click **`windows\settings.bat`**. Choose **2 = MT5** and a profile (1 safe, 2 balanced,
+   3 active). It writes both into `config.yaml` for you and shows the result. You can also edit
+   `broker: kind: mt5` and `profile:` by hand. Keep MT5 logged in to the **demo** account.
 2. Run `check.bat` again.
 3. Double-click **`windows\test_connection.bat`** and type `YES`. It places one minimum-lot BUY
    LIMIT far below the market, checks that the broker accepted it, and cancels it straight away.
@@ -206,6 +208,7 @@ warning; read it before starting. Start with the minimum risk.
 | `stop_new_trades.bat` | no new trades; open trades keep their SL/TP and are still managed |
 | `resume_trading.bat` | allows new trades again (after the guard's drawdown halt, restart `start_agent.bat` instead) |
 | `close_everything.bat` | cancels all its orders and closes all its positions within seconds, then pauses |
+| `settings.bat` | switch between PAPER and MT5 (real orders) and choose the profile: safe / balanced / active |
 | `check.bat` / `scan.bat` | installation check / what the bot sees on the market now |
 | `test_connection.bat` | proves the bot can trade on the account: places and cancels one tiny far-away order |
 
@@ -241,7 +244,7 @@ Put the password in `windows\secrets.bat` as `MT5_PASSWORD=...`, never in `confi
 | `MT5 initialize() failed ... IPC timeout` | MT5 isn't running or is still starting. Open it, log in, and try again. With several terminals, set `mt5_path` |
 | `symbol 'XAUUSD' not found ... your broker has: XAUUSD.m` | put that exact name in `markets: symbol:` |
 | `lists several symbols in one line` | give each market its own `- symbol:` entry (Step 4, *Several markets*) |
-| No trades and an empty MT5 journal | the window says `paper broker`: set `broker: kind: mt5`. With `mt5 broker` it only trades grade-A setups that pass the guard, so quiet days are normal; the status line each candle shows what it waits for. `test_connection.bat` proves the link |
+| No trades and an empty MT5 journal | the window says `paper broker` / `PAPER MODE`: run `settings.bat` and choose 2 = MT5 (the `config:` line at start-up shows which file the agent read). With `mt5 broker` it only trades grade-A setups that pass the guard, so quiet days are normal; the status line each candle shows what it waits for. `test_connection.bat` proves the link |
 | `10027 AutoTrading disabled by client` | the **Algo Trading** button is off (Step 1.3) |
 | `Trading is not allowed on this login` | you logged in with the investor password; use the master password |
 | `10019 not enough money` | the account is too small for the risk setting; lower `risk_per_trade_pct` or add funds |

@@ -446,6 +446,9 @@ class TradingAgent:
         self.warmup()
         log.info("agent running on %d market(s) with %s broker, profile %s (min score %s)", len(self.markets),
                  self.broker.name, self.cfg.profile, self.cfg.strategy.min_score)
+        if self.broker.name == "paper" and any(m.cfg.feed.lower() == "mt5" for m in self.markets):
+            log.warning("PAPER MODE: trades are only simulated - NOTHING is sent to your MT5 account. "
+                        "To trade on it run windows\\settings.bat (or set broker: kind: mt5 in config.yaml).")
         while not stop.is_set():
             deadline = time.time() + self._next_wake()
             while not stop.is_set() and time.time() < deadline:

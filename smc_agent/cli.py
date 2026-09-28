@@ -8,6 +8,7 @@
     run        start the autonomous agent (paper by default)
     webhook    execute setups sent by the TradingView indicator
     check      verify the installation (config, MT5 terminal, account, symbol) - sends no orders
+    mode       show or change where orders go (paper / mt5) and the trading profile
 """
 
 from __future__ import annotations
@@ -254,6 +255,23 @@ def cmd_check(args: argparse.Namespace, cfg: AppConfig) -> None:
         raise SystemExit(1)
 
 
+def cmd_mode(args: argparse.Namespace, cfg: AppConfig) -> None:
+    from .config_edit import change_mode, describe
+
+    if not args.config:
+        raise SystemExit("mode needs the config file: smc-agent -c config.yaml mode ...")
+    if args.broker or args.profile:
+        cfg = change_mode(args.config, broker=args.broker, profile=args.profile)
+        print(f"Saved {Path(args.config).resolve()}:")
+    else:
+        print(f"{Path(args.config).resolve()}:")
+    print(describe(cfg))
+    if cfg.broker.kind == "paper" and any(m.feed.lower() == "mt5" for m in cfg.markets):
+        print("\n  Nothing reaches your MT5 account in PAPER mode.")
+    if args.broker or args.profile:
+        print("\nRestart start_agent.bat so the running agent uses these settings.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="smc-agent", description="SMC / ICT trading agent")
     p.add_argument("-c", "--config", help="YAML config (see config.example.yaml)")
@@ -306,6 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("webhook", help="receive TradingView alerts")
     sp.set_defaults(func=cmd_webhook)
 
+    sp = sub.add_parser("mode", help="show or change where orders go and the trading profile")
+    sp.add_argument("--broker", choices=["paper", "mt5", "ccxt"], help="paper = simulated, mt5 = real orders")
+    sp.add_argument("--profile", choices=["safe", "balanced", "active"], help="how picky the agent is")
+    sp.set_defaults(func=cmd_mode)
+
     sp = sub.add_parser("check", help="verify the installation before trading (sends no orders)")
     sp.add_argument("--test-order", action="store_true",
                     help="also place a minimum-size BUY LIMIT far below the market and cancel it at once "
@@ -324,6 +347,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\nProblem in {args.config or 'the configuration'}:\n\n{exc}\n", file=sys.stderr)
         raise SystemExit(2) from None
     _apply_overrides(cfg, getattr(args, "set", []))
+    if args.command in ("run", "webhook"):
+        log.info("config: %s", Path(args.config).resolve() if args.config else "built-in defaults")
     args.func(args, cfg)
 
 
