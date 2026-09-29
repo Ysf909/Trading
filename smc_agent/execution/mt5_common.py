@@ -32,9 +32,27 @@ log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
 
 
-def connect(cfg: BrokerConfig) -> Any:
-    """Import MetaTrader5 and attach to the terminal (optionally logging in)."""
+def connect(cfg: BrokerConfig, force: bool = False) -> Any:
+    """Import MetaTrader5 and attach to the terminal (optionally logging in).
+
+    The MT5 feed and broker share one connection: when the terminal is already attached to the
+    right account nothing is re-initialised (a new login would drop the broker link for a moment).
+    ``force`` re-attaches, e.g. after the terminal was restarted."""
     import MetaTrader5 as mt5  # optional dependency (Windows)
+
+    if not force:
+        try:
+            attached = mt5.terminal_info() is not None
+            acct = mt5.account_info() if attached else None
+        except Exception:  # noqa: BLE001 - not initialised yet
+            attached, acct = False, None
+        if attached and acct is not None and (not cfg.mt5_login or int(acct.login) == int(cfg.mt5_login)):
+            return mt5
+    else:
+        try:
+            mt5.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
 
     kwargs: dict[str, Any] = {}
     if cfg.mt5_login:

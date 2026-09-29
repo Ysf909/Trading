@@ -198,6 +198,7 @@ class MT5Feed:
         from ..execution.mt5_common import ServerClock, connect, ensure_symbol, mt5_timeframe
 
         cfg = broker or BrokerConfig()
+        self.cfg = cfg
         self.mt5 = mt5 = connect(cfg)
         self.symbol = symbol
         self.info = ensure_symbol(mt5, symbol)
@@ -210,7 +211,16 @@ class MT5Feed:
         # position 1 skips the still-forming candle
         rates = self.mt5.copy_rates_from_pos(self.symbol, self.tf, 1, count)
         if rates is None or len(rates) == 0:
-            raise RuntimeError(f"MT5 copy_rates failed for {self.symbol}: {self.mt5.last_error()}")
+            # the terminal was restarted or lost its link: re-attach once and retry
+            from ..execution.mt5_common import connect
+
+            log.warning("mt5: no candles for %s (%s) - reconnecting to the terminal", self.symbol,
+                        self.mt5.last_error())
+            self.mt5 = connect(self.cfg, force=True)
+            rates = self.mt5.copy_rates_from_pos(self.symbol, self.tf, 1, count)
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"MT5 copy_rates failed for {self.symbol}: {self.mt5.last_error()} - "
+                               "is the MT5 terminal open, logged in and connected?")
         df = pd.DataFrame(rates)
         df.index = self.clock.to_utc(df.pop("time"))
         df = df.rename(columns={"tick_volume": "volume"})

@@ -140,6 +140,7 @@ def test_unknown_symbol_suggests_the_broker_name(monkeypatch):
 
 def test_login_details_are_passed_to_the_terminal(monkeypatch):
     fake = FakeMT5()
+    fake.attached = False  # terminal not attached yet
     monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
     monkeypatch.setenv("MT5_PASSWORD", "secret")
     from smc_agent.execution.mt5_broker import MT5Broker
@@ -148,3 +149,42 @@ def test_login_details_are_passed_to_the_terminal(monkeypatch):
     args, kwargs = fake.init_kwargs
     assert args == ("C:\\MT5\\terminal64.exe",)
     assert kwargs == {"login": 5012345, "password": "secret", "server": "DemoBroker-Server"}
+
+
+def test_feed_and_broker_share_one_connection(monkeypatch):
+    fake = FakeMT5()
+    fake.attached = False
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    from smc_agent.data.feeds import MT5Feed
+    from smc_agent.execution.mt5_broker import MT5Broker
+
+    cfg = BrokerConfig(mt5_login=5012345, mt5_server="DemoBroker-Server")
+    MT5Broker(cfg)
+    MT5Feed("XAUUSD", "15m", cfg)
+    MT5Feed("XAGUSD", "15m", cfg)
+    assert fake.init_calls == 1  # no second login that would drop the broker link
+
+
+def test_feed_reconnects_after_the_terminal_restarts(monkeypatch):
+    from .fake_mt5 import make_rates
+
+    fake = FakeMT5()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    from smc_agent.data.feeds import MT5Feed
+
+    feed = MT5Feed("XAUUSD", "15m", BrokerConfig(mt5_server_time="ny+7"))
+    good = make_rates(fake.server_now() - 50 * 900, 50)
+    fake.rates = None  # terminal restarted: IPC gone, no data
+    real_init = fake.initialize
+
+    def restart(*a, **k):
+        fake.rates = good
+        return real_init(*a, **k)
+
+    fake.initialize = restart
+    df = feed.latest(10)
+    assert len(df) == 10 and fake.init_calls == 1
+    fake.rates = None
+    fake.initialize = real_init
+    with pytest.raises(RuntimeError, match="MT5 terminal open"):
+        feed.latest(10)

@@ -256,8 +256,16 @@ class TradingAgent:
         pos = "no trade" if info is None else (
             f"{info['status']} {'long' if info['direction'] == 1 else 'short'}"
             + (f" @ {info['fill_price']:.6g}" if info.get("fill_price") else ""))
+        link = ""
+        term = getattr(self.broker, "mt5", None)
+        if term is not None:
+            try:
+                ti = term.terminal_info()
+                link = "" if ti is not None and ti.connected else " | MT5 OFFLINE: terminal not connected to the broker"
+            except Exception:  # noqa: BLE001 - status only
+                link = " | MT5 OFFLINE"
         return (f"{m.cfg.symbol} {closed:%H:%M} NY close {bar.close:.6g} | trend {trend or 'n/a'} | "
-                f"setups: {setups} | guard: {block or 'clear'} | {pos}")
+                f"setups: {setups} | guard: {block or 'clear'} | {pos}{link}")
 
     def manage_position(self, m: MarketRuntime, bar: Any) -> None:
         """Let the guard cancel / close / protect what is working on this market."""

@@ -43,12 +43,16 @@ class FakeMT5:
         self.expiration_flags = 1 | 2 | 4 | 8
         self.rates = None  # numpy structured array returned by copy_rates_from_pos
         self.init_kwargs = None
+        self.init_calls = 0
+        self.attached = True  # terminal_info() is None until initialize() when False
         self.margin_free = 10_000.0
         self.leverage = {"XAUUSD": 100.0}  # per-symbol margin leverage (order_calc_margin)
 
     # ------------------------------------------------------------ terminal
     def initialize(self, *args, **kwargs):
         self.init_kwargs = (args, kwargs)
+        self.init_calls += 1
+        self.attached = self.initialized
         return self.initialized
 
     def shutdown(self):
@@ -58,6 +62,8 @@ class FakeMT5:
         return (-10005, "IPC timeout") if not self.initialized else (1, "Success")
 
     def terminal_info(self):
+        if not self.attached:
+            return None
         return NS(connected=True, trade_allowed=self.algo_trading, tradeapi_disabled=self.api_disabled,
                   name="MetaTrader 5", company="Demo Broker Ltd", build=4755, path="C:\\MT5")
 
