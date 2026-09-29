@@ -260,15 +260,20 @@ def cmd_mode(args: argparse.Namespace, cfg: AppConfig) -> None:
 
     if not args.config:
         raise SystemExit("mode needs the config file: smc-agent -c config.yaml mode ...")
-    if args.broker or args.profile:
-        cfg = change_mode(args.config, broker=args.broker, profile=args.profile)
+    changing = bool(args.broker or args.profile or args.timeframe or args.add_market)
+    if changing:
+        adds = [x for item in (args.add_market or []) for x in item.replace(",", " ").split()]
+        cfg = change_mode(args.config, broker=args.broker, profile=args.profile, timeframe=args.timeframe,
+                          add_markets=adds)
         print(f"Saved {Path(args.config).resolve()}:")
     else:
         print(f"{Path(args.config).resolve()}:")
     print(describe(cfg))
     if cfg.broker.kind == "paper" and any(m.feed.lower() == "mt5" for m in cfg.markets):
         print("\n  Nothing reaches your MT5 account in PAPER mode.")
-    if args.broker or args.profile:
+    if changing:
+        if args.add_market:
+            print("\n  New markets: run check.bat - it confirms each name exists at your broker.")
         print("\nRestart start_agent.bat so the running agent uses these settings.")
 
 
@@ -327,6 +332,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("mode", help="show or change where orders go and the trading profile")
     sp.add_argument("--broker", choices=["paper", "mt5", "ccxt"], help="paper = simulated, mt5 = real orders")
     sp.add_argument("--profile", choices=["safe", "balanced", "active"], help="how picky the agent is")
+    sp.add_argument("--timeframe", choices=["1m", "5m", "15m", "30m", "1h"], help="entry timeframe of every market")
+    sp.add_argument("--add-market", action="append", metavar="SYMBOL",
+                    help="add a market (exact MT5 name); repeat or separate names with spaces")
     sp.set_defaults(func=cmd_mode)
 
     sp = sub.add_parser("check", help="verify the installation before trading (sends no orders)")

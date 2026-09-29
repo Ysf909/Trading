@@ -139,7 +139,20 @@ profit, and it started showing an "edge" on random-walk data, which is a warning
 guard entirely at score 4-5 more than doubled the worst drawdown (12.8R).
 
 Same caveats as above: in-sample, not gold, costs excluded. At 0.5% risk per trade, 7.1R is a
-drawdown of about 3.5% of the account.
+drawdown of about 3.5% of the account. The balanced and active profiles also switch off the
+fixed-price spread limit (the spread is still checked against the ATR). Active allows 3 open
+positions and 10 trades a day; balanced allows 6 trades a day.
+
+**How often it trades.** Setups are rare by design: about 1 (safe), 1.4 (balanced) and 3.3
+(active) filled trades per 1,000 candles per market. For gold (about 460 M15 candles a week) that
+is roughly 0.5 / 0.65 / 1.5 trades a week on M15, and about three times as many on M5. To trade
+more, use **more markets and a lower timeframe** (`windows\settings.bat`); the setup quality stays
+the same. Loosening the rules themselves was tested and rejected:
+- entering at the zone edge, or a lower minimum reward-to-risk (1.2): fewer good trades, not more;
+- internal structure length 3: 70% more trades, but the worst drawdown grew from 7.1R to 11.7R and
+  it "made money" on random-walk data, a sign of noise rather than edge;
+- score 3+: a lower average (+0.12R) and a profit factor of 1.23;
+- a longer MSS window and order life (40 bars): +18% trades, but less total R. Not adopted.
 
 ## 5. The learner
 

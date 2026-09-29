@@ -75,6 +75,7 @@ class MarketRuntime:
     last_time: pd.Timestamp | None = None
     errors: int = 0
     stale: bool = False
+    last_setup: str = ""  # what happened to the latest setup (for the status line)
 
 
 class TradingAgent:
@@ -230,7 +231,11 @@ class TradingAgent:
                 self.manage_position(m, bar)
                 if signals and self.self_signals:  # act only on the newest candle
                     for sig in signals:
-                        outcomes.append(self.handle_signal(sig, m.engine, m, bar.spread or None))
+                        out = self.handle_signal(sig, m.engine, m, bar.spread or None)
+                        outcomes.append(out)
+                        closed_ny = (bar.time + timedelta(minutes=m.minutes)).astimezone(NY)
+                        m.last_setup = (f"{sig.side} {sig.grade} at {closed_ny:%H:%M} NY: "
+                                        + ("ORDER PLACED" if out.get("taken") else f"skipped ({out.get('reason', '')})"))
                 log.info(self.status_line(m, bar))
         return outcomes
 
@@ -264,8 +269,9 @@ class TradingAgent:
                 link = "" if ti is not None and ti.connected else " | MT5 OFFLINE: terminal not connected to the broker"
             except Exception:  # noqa: BLE001 - status only
                 link = " | MT5 OFFLINE"
+        last = f" | last setup: {m.last_setup}" if m.last_setup else ""
         return (f"{m.cfg.symbol} {closed:%H:%M} NY close {bar.close:.6g} | trend {trend or 'n/a'} | "
-                f"setups: {setups} | guard: {block or 'clear'} | {pos}{link}")
+                f"setups: {setups} | guard: {block or 'clear'} | {pos}{last}{link}")
 
     def manage_position(self, m: MarketRuntime, bar: Any) -> None:
         """Let the guard cancel / close / protect what is working on this market."""

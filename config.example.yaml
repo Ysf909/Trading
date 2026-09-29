@@ -5,7 +5,10 @@
 # How picky the agent is (tests on 14 markets, same entries, 50% at 1.5R then stop to entry):
 #   safe      69 trades, 67% won, +0.72R per trade, worst drawdown 3.1R   (strictest)
 #   balanced  96 trades, 67% won, +0.73R per trade, worst drawdown 4.1R   (no daily-range limit, looser H4 rules)
-#   active   223 trades, 56% won, +0.40R per trade, worst drawdown 7.1R   (balanced + grade B setups)
+#   active   223 trades, 56% won, +0.40R per trade, worst drawdown 7.1R   (balanced + grade B setups,
+#                                                                         3 open positions, 10 trades a day)
+# About 1 / 1.4 / 3.3 trades per 1,000 candles per market: for more trades use M5 and more markets
+# (windows\settings.bat does both).
 # A profile overrides the settings it changes below. Risk per trade, loss limits, news, weekend and
 # "never against the daily trend" protection are the same in every profile.
 profile: safe

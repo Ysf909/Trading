@@ -327,13 +327,18 @@ PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     "safe": {},
     # the daily-range limit, the H4 counter-trend rule, the range-extreme rule and the "n timeframes must
     # agree" rule are off; the D1 rule (never against the daily trend) and the target obstacles stay
+    # (a fixed-price spread limit is also off: the spread is still checked against the ATR)
     "balanced": {
-        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0},
+        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0,
+                  "max_spread": 0.0},
+        "risk": {"max_trades_per_day": 6},
     },
-    # balanced + grade B setups (confluence score 4+ instead of 6+)
+    # balanced + grade B setups (confluence score 4+ instead of 6+), room for more trades at once
     "active": {
         "strategy": {"min_score": 4},
-        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0},
+        "guard": {"adr_max_mult": 0.0, "mtf_soft_opposing": [], "mtf_min_aligned": 0, "mtf_pd_extreme": 1.0,
+                  "max_spread": 0.0},
+        "risk": {"max_open_positions": 3, "max_trades_per_day": 10},
     },
 }
 
@@ -348,6 +353,8 @@ def apply_profile(cfg: AppConfig) -> None:
         cfg.strategy = replace(cfg.strategy, **p["strategy"])
     if p.get("guard"):
         cfg.guard = replace(cfg.guard, **p["guard"])
+    if p.get("risk"):
+        cfg.risk = replace(cfg.risk, **p["risk"])
 
 
 def load_config(path: str | os.PathLike | None) -> AppConfig:

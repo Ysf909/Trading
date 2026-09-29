@@ -50,16 +50,64 @@ def set_section_key(lines: list[str], section: str, key: str, value: str) -> lis
     return lines[: start + 1] + [f"  {key}: {value}"] + lines[start + 1:]
 
 
+CRYPTO = ("BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "BNB")
+TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h")
+
+
+def _section(lines: list[str], name: str) -> tuple[int, int] | None:
+    """(first line, end) of a top-level section; end is the next top-level key."""
+    start = next((i for i, line in enumerate(lines) if re.match(rf"^{name}\s*:", line)), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end].startswith((" ", "\t", "#"))):
+        end += 1
+    return start, end
+
+
+def set_markets_timeframe(lines: list[str], timeframe: str) -> list[str]:
+    sec = _section(lines, "markets")
+    if sec is None:
+        return lines
+    for i in range(sec[0] + 1, sec[1]):
+        if re.match(r"^\s+timeframe\s*:", lines[i]):
+            lines[i] = _value_with_comment(lines[i], timeframe)
+    return lines
+
+
+def add_market(lines: list[str], symbol: str, timeframe: str, feed: str) -> list[str]:
+    sec = _section(lines, "markets")
+    if sec is None:
+        return lines + ["", "markets:"] + _market_block(symbol, timeframe, feed, "  ")
+    start, end = sec
+    items = [line for line in lines[start + 1:end] if re.match(r"^\s*- symbol\s*:", line)]
+    if any(re.match(rf"^\s*- symbol\s*:\s*{re.escape(symbol)}\s*(#.*)?$", line) for line in items):
+        return lines  # already there
+    indent = re.match(r"^(\s*)-", items[0]).group(1) if items else "  "
+    at = end
+    while at > start + 1 and not lines[at - 1].strip():
+        at -= 1
+    return lines[:at] + _market_block(symbol, timeframe, feed, indent) + lines[at:]
+
+
+def _market_block(symbol: str, timeframe: str, feed: str, indent: str) -> list[str]:
+    block = [f"{indent}- symbol: {symbol}", f"{indent}  timeframe: {timeframe}", f"{indent}  feed: {feed}"]
+    if any(k in symbol.upper() for k in CRYPTO):
+        block += [f"{indent}  guard:", f"{indent}    market_hours: 24x7", f"{indent}    max_spread: 0"]
+    return block
+
+
 def describe(cfg: AppConfig) -> str:
     where = {"paper": "PAPER - trades are only simulated, nothing is sent to MT5",
              "mt5": "MT5 - real orders on the account the MT5 terminal is logged into",
              "ccxt": "crypto exchange (ccxt)"}.get(cfg.broker.kind.lower(), cfg.broker.kind)
     return (f"  orders : {where}\n"
             f"  profile: {cfg.profile} (minimum setup score {cfg.strategy.min_score}/10)\n"
-            f"  markets: {', '.join(m.symbol for m in cfg.markets)}")
+            f"  markets: {', '.join(f'{m.symbol} {m.timeframe}' for m in cfg.markets)}")
 
 
-def change_mode(path: str | Path, broker: str | None = None, profile: str | None = None) -> AppConfig:
+def change_mode(path: str | Path, broker: str | None = None, profile: str | None = None,
+                timeframe: str | None = None, add_markets: list[str] | None = None) -> AppConfig:
     """Edit ``path`` in place (a .bak copy is kept) and return the new configuration.
     Nothing is written if the result would not load."""
     path = Path(path)
@@ -67,12 +115,24 @@ def change_mode(path: str | Path, broker: str | None = None, profile: str | None
         raise ValueError(f"broker must be one of {', '.join(BROKERS)}")
     if profile is not None and profile not in PROFILES:
         raise ValueError(f"profile must be one of {', '.join(PROFILES)}")
+    if timeframe is not None and timeframe not in TIMEFRAMES:
+        raise ValueError(f"timeframe must be one of {', '.join(TIMEFRAMES)}")
     text = path.read_text()
     lines = text.split("\n")
     if profile is not None:
         lines = set_top_level(lines, "profile", profile)
     if broker is not None:
         lines = set_section_key(lines, "broker", "kind", broker)
+    if timeframe is not None:
+        lines = set_markets_timeframe(lines, timeframe)
+    if add_markets:
+        current = load_config(path)
+        tf = timeframe or (current.markets[0].timeframe if current.markets else "15m")
+        feed = current.markets[0].feed if current.markets else "mt5"
+        for sym in add_markets:
+            sym = sym.strip()
+            if sym:
+                lines = add_market(lines, sym, tf, feed)
     new = "\n".join(lines)
     with tempfile.TemporaryDirectory() as tmp:
         probe = Path(tmp) / "config.yaml"

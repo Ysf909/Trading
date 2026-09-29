@@ -123,6 +123,20 @@ Everything else is already set for gold: the risk guard, news, sessions, and the
 Risk per trade, loss limits, news and weekend protection are the same in all three. The table is
 in [docs/strategy.md](strategy.md#trading-profiles-more-trades-vs-more-filtering).
 
+**How many trades to expect.** These are approximate, per market, from the tests:
+
+| | M15 | M5 |
+|---|---|---|
+| safe | ~0.5 a week | ~1.5 a week |
+| balanced | ~0.7 a week | ~2 a week |
+| active | ~1.5 a week | ~4-5 a week |
+
+So one or two markets on M15 can go days without a trade. For more trades, `windows\settings.bat`
+can switch every market to **M5** and **add markets** by their exact Market Watch names (for
+example silver, EURUSD, GBPUSD, US30). With 5 markets on M5 and `active`, expect roughly 20+
+trades a week. Run `check.bat` after adding markets: it confirms the names and shows the lot size
+for each one.
+
 **Several markets** (e.g. gold and bitcoin): give each one its own entry. Never put several
 names in one `symbol:` line.
 
@@ -169,8 +183,9 @@ bot.
 
 ### Step 8 - Real orders on the demo account
 
-1. Double-click **`windows\settings.bat`**. Choose **2 = MT5** and a profile (1 safe, 2 balanced,
-   3 active). It writes both into `config.yaml` for you and shows the result. You can also edit
+1. Double-click **`windows\settings.bat`**. Choose **2 = MT5**, a profile (1 safe, 2 balanced,
+   3 active), the timeframe (M15 or M5) and any markets to add. It writes everything into
+   `config.yaml` for you and shows the result. You can also edit
    `broker: kind: mt5` and `profile:` by hand. Keep MT5 logged in to the **demo** account.
 2. Run `check.bat` again.
 3. Double-click **`windows\test_connection.bat`** and type `YES`. It places one minimum-lot BUY
@@ -208,7 +223,7 @@ warning; read it before starting. Start with the minimum risk.
 | `stop_new_trades.bat` | no new trades; open trades keep their SL/TP and are still managed |
 | `resume_trading.bat` | allows new trades again (after the guard's drawdown halt, restart `start_agent.bat` instead) |
 | `close_everything.bat` | cancels all its orders and closes all its positions within seconds, then pauses |
-| `settings.bat` | switch between PAPER and MT5 (real orders) and choose the profile: safe / balanced / active |
+| `settings.bat` | switch between PAPER and MT5 (real orders); choose the profile (safe / balanced / active), the timeframe (M15 / M5); add markets |
 | `check.bat` / `scan.bat` | installation check / what the bot sees on the market now |
 | `test_connection.bat` | proves the bot can trade on the account: places and cancels one tiny far-away order |
 

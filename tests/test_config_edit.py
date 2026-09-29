@@ -60,3 +60,24 @@ def test_mode_command(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Saved" in out and "MT5 - real orders" in out and "profile: active (minimum setup score 4/10)" in out
     assert load_config(p).broker.kind == "mt5"
+
+
+def test_timeframe_and_added_markets(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text(OLD_STYLE)
+    cfg = change_mode(p, profile="active", timeframe="5m", add_markets=["BTCUSD", "XAGUSD_", "XAUUSD_"])
+    assert [(m.symbol, m.timeframe) for m in cfg.markets] == [("XAUUSD_", "5m"), ("BTCUSD", "5m"), ("XAGUSD_", "5m")]
+    btc = cfg.markets[1]
+    assert btc.feed == "csv" and btc.guard == {"market_hours": "24x7", "max_spread": 0}  # crypto hours
+    assert cfg.markets[2].guard == {}
+    assert cfg.risk.max_open_positions == 3 and cfg.guard.max_spread == 0  # active profile
+    text = p.read_text()
+    assert text.index("XAGUSD_") < text.index("broker:")  # inside the markets list
+
+
+def test_mode_command_adds_markets_from_one_string(tmp_path, capsys):
+    p = tmp_path / "config.yaml"
+    p.write_text(OLD_STYLE)
+    main(["-c", str(p), "mode", "--timeframe", "5m", "--add-market", "EURUSD_ GBPUSD_"])
+    out = capsys.readouterr().out
+    assert "XAUUSD_ 5m, EURUSD_ 5m, GBPUSD_ 5m" in out and "check.bat" in out
